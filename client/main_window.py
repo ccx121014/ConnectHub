@@ -428,11 +428,12 @@ class MainWindow(QMainWindow):
     def set_websocket_client(self, client: WebSocketClient):
         """Set the WebSocket client for communication."""
         self._ws_client = client
-        client.message_received.connect(self._on_message_received)
-        client.connected.connect(self._on_connected)
-        client.disconnected.connect(self._on_disconnected)
-        client.reconnecting.connect(self._on_reconnecting)
-        client.connection_failed.connect(self._on_connection_failed)
+        # 所有信号来自 SignalBridge (client.signals)
+        client.signals.message_received.connect(self._on_message_received)
+        client.signals.connected.connect(self._on_connected)
+        client.signals.disconnected.connect(self._on_disconnected)
+        client.signals.reconnecting.connect(self._on_reconnecting)
+        client.signals.connection_failed.connect(self._on_connection_failed)
 
     def set_username(self, username: str):
         """Set the current username."""

@@ -1,51 +1,56 @@
 """
 WebSocket Client for Online Collaboration Suite
-Handles async communication with the server using websockets library.
-Uses Python threading + asyncio to avoid blocking the Qt UI thread.
+- 关键点：
+  * WebSocketClient 是纯 Python 对象（不继承 QObject）——避免 Qt 线程亲和/对象生命周期问题）
+  * 所有跨线程信号由独立的 SignalBridge(QObject) 承载
+  * asyncio 事件循环运行在独立的 Python daemon thread 中，与 Qt 主线程完全隔离
 """
 
 import asyncio
 import logging
 import threading
 import time
-from typing import Optional, Callable, Dict, Any
 from pathlib import Path
+from typing import Optional
 import sys as _sys
 
 _project_root = Path(__file__).parent.parent.resolve()
 _sys.path.insert(0, str(_project_root))
 _sys.path.insert(0, str(Path(__file__).parent))
 
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal  # 仅用于 SignalBridge
 
 from protocol.messages import Message, MessageType, parse_message, create_message
 
 logger = logging.getLogger(__name__)
 
 
-class WebSocketClient(QObject):
+class SignalBridge(QObject):
     """
-    WebSocket client with async message handling.
-    Runs asyncio event loop in a separate Python thread.
-    Qt signals are used for cross-thread communication with the UI.
-
-    All signals use the generic 'object' type to ensure reliable delivery
-    across thread boundaries (PyQt cannot serialize custom Python types
-    in its meta-object system).
+    专用于承载跨线程信号 — 仅在主线程创建并持有。
+    子线程只负责 emit，槽也在主线程被 Qt 自动排队执行。
     """
-
     connected = pyqtSignal()
     disconnected = pyqtSignal()
     error_occurred = pyqtSignal(str)
-    message_received = pyqtSignal(object)
+    message_received = pyqtSignal(object)    # Message 以 object 透传
     reconnecting = pyqtSignal(int)
     connection_failed = pyqtSignal(str)
 
-    def __init__(self, host: str = "localhost", port: int = 8765, parent: Optional[QObject] = None):
-        super().__init__(parent)
+
+class WebSocketClient:
+    """
+    纯 Python WebSocket 客户端，不继承 QObject。
+    通过 self.signals (SignalBridge) 与 Qt 交互。
+    """
+
+    def __init__(self, host: str = "localhost", port: int = 8765):
         self.host = host
         self.port = port
         self.uri = f"ws://{host}:{port}"
+
+        # 唯一的 QObject 子类，必须在创建者（主线程）创建
+        self.signals = SignalBridge()
 
         self._websocket = None
         self._connected = False
@@ -70,8 +75,10 @@ class WebSocketClient(QObject):
         self._username = username
         self._password = password
 
+    # --- 启动/停止 ---
+
     def start(self):
-        """Start the WebSocket client in a background thread."""
+        """在后台线程中启动事件循环。"""
         with self._state_lock:
             if self._thread and self._thread.is_alive():
                 logger.warning("WebSocket client already running")
@@ -87,7 +94,7 @@ class WebSocketClient(QObject):
         logger.info(f"WebSocket client thread started for {self.uri}")
 
     def stop(self):
-        """Stop the WebSocket client without blocking the caller."""
+        """停止客户端，不阻塞调用者。"""
         logger.info("Stopping WebSocket client...")
         self._closing = True
         loop = self._loop
@@ -97,8 +104,10 @@ class WebSocketClient(QObject):
             except Exception:
                 pass
 
+    # --- 事件循环 ---
+
     def _run_event_loop(self):
-        """Run the asyncio event loop in the background thread."""
+        """后台线程中的 asyncio 事件循环。"""
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -118,9 +127,8 @@ class WebSocketClient(QObject):
             logger.info("WebSocket client thread stopped")
 
     async def _main_loop(self):
-        """Main connection/reconnection loop."""
+        """主循环：连接/断线重连。"""
         self._reconnect_attempt = 0
-
         while not self._closing:
             try:
                 await self._connect_and_run()
@@ -137,12 +145,19 @@ class WebSocketClient(QObject):
             if self._reconnect_attempt > self._max_reconnect_attempts:
                 error_msg = f"连接失败：无法连接到 {self.uri}"
                 logger.error(error_msg)
-                self.connection_failed.emit(error_msg)
+                try:
+                    self.signals.connection_failed.emit(error_msg)
+                except RuntimeError:
+                    # QObject 已被销毁
+                    pass
                 break
 
             delay = min(1 * self._reconnect_attempt, 3)
             logger.info(f"Reconnecting in {delay}s (attempt {self._reconnect_attempt})")
-            self.reconnecting.emit(self._reconnect_attempt)
+            try:
+                self.signals.reconnecting.emit(self._reconnect_attempt)
+            except RuntimeError:
+                pass
 
             try:
                 await asyncio.sleep(delay)
@@ -153,15 +168,14 @@ class WebSocketClient(QObject):
             if self._connected:
                 self._connected = False
                 try:
-                    self.disconnected.emit()
-                except Exception:
+                    self.signals.disconnected.emit()
+                except RuntimeError:
                     pass
 
     async def _connect_and_run(self):
-        """Connect to the server and process messages."""
+        """连接并处理消息。"""
         import websockets
 
-        # 先尝试最简参数，再尝试带 ping 参数；每组超时 5s — 避免用户等待过久
         conn = None
         param_sets = [
             dict(),
@@ -182,13 +196,13 @@ class WebSocketClient(QObject):
                 logger.warning("Connection timed out (5s)")
                 continue
             except (TypeError, ValueError) as e:
-                logger.debug(f"Params failed ({params}): {e}")
+                logger.debug(f"Params failed: {e}")
                 continue
             except ConnectionRefusedError:
                 logger.warning(f"Connection refused — is the server running at {self.uri}?")
                 continue
             except OSError as e:
-                logger.warning(f"OS error connecting: {e}")
+                logger.warning(f"OS error: {e}")
                 continue
             except Exception as e:
                 logger.warning(f"Connect failed: {e}")
@@ -200,7 +214,11 @@ class WebSocketClient(QObject):
         self._websocket = conn
         with self._state_lock:
             self._connected = True
-        self.connected.emit()
+
+        try:
+            self.signals.connected.emit()
+        except RuntimeError:
+            pass
 
         try:
             async for raw_message in conn:
@@ -209,7 +227,11 @@ class WebSocketClient(QObject):
                 try:
                     parsed = parse_message(raw_message)
                     logger.debug(f"Received: {parsed.type}")
-                    self.message_received.emit(parsed)
+                    try:
+                        self.signals.message_received.emit(parsed)
+                    except RuntimeError:
+                        # 主线程 QObject 已销毁，停止处理
+                        break
                 except Exception as e:
                     logger.warning(f"Failed to parse message: {e}")
         except websockets.exceptions.ConnectionClosed:
@@ -225,18 +247,16 @@ class WebSocketClient(QObject):
                 pass
             self._websocket = None
             try:
-                self.disconnected.emit()
-            except Exception:
+                self.signals.disconnected.emit()
+            except RuntimeError:
                 pass
 
     async def _send_async(self, message: Message):
-        """Send a message (called within the event loop)."""
+        """在事件循环内部发送消息。"""
         ws = self._websocket
         if not ws:
             return
-        # 跨版本兼容地检查连接是否仍可用：
-        # - 旧版 websockets 使用 .open
-        # - 新版使用 .closed (bool) 或 .close_code
+        # 检查连接是否仍可用
         is_alive = True
         if hasattr(ws, "closed") and isinstance(ws.closed, bool):
             is_alive = not ws.closed
@@ -253,16 +273,16 @@ class WebSocketClient(QObject):
         except Exception as e:
             logger.debug(f"Send failed: {e}")
 
+    # --- 对外发送接口 ---
+
     def send(self, message: Message):
-        """Thread-safe: send a message from the Qt/UI thread."""
+        """线程安全地从 Qt/UI 线程发送消息。"""
         loop = self._loop
         if loop and loop.is_running() and self._websocket is not None:
             try:
-                # 使用 run_coroutine_threadsafe 以便有统一的异常出口
                 future = asyncio.run_coroutine_threadsafe(
                     self._send_async(message), loop
                 )
-                # 无需等待结果，但加一个空回调避免"Future exception never retrieved"
                 def _on_done(f):
                     try:
                         f.result()
@@ -326,16 +346,13 @@ class WebSocketClient(QObject):
         )
         self.send(msg)
 
-    def send_file_transfer_request(self, target: str, file_name: str, file_size: int, file_id: str, chunk_count: int, chunk_size: int):
+    def send_file_transfer_request(self, target, file_name, file_size, file_id, chunk_count, chunk_size):
         msg = create_message(
             MessageType.FILE_TRANSFER_REQUEST,
             sender=self._username or "",
             target=target,
-            file_name=file_name,
-            file_size=file_size,
-            file_id=file_id,
-            chunk_count=chunk_count,
-            chunk_size=chunk_size,
+            file_name=file_name, file_size=file_size,
+            file_id=file_id, chunk_count=chunk_count, chunk_size=chunk_size,
         )
         self.send(msg)
 

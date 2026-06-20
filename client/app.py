@@ -113,10 +113,11 @@ class CollaborationApp(QApplication):
         self._ws_client = WebSocketClient(server, port)
         self._ws_client.set_credentials(username, password)
 
-        self._ws_client.connected.connect(self._on_websocket_connected)
-        self._ws_client.error_occurred.connect(self._on_websocket_error)
-        self._ws_client.message_received.connect(self._on_message_received)
-        self._ws_client.connection_failed.connect(self._on_connection_failed)
+        # 所有信号都来自 self._ws_client.signals (SignalBridge)
+        self._ws_client.signals.connected.connect(self._on_websocket_connected)
+        self._ws_client.signals.error_occurred.connect(self._on_websocket_error)
+        self._ws_client.signals.message_received.connect(self._on_message_received)
+        self._ws_client.signals.connection_failed.connect(self._on_connection_failed)
         self._ws_client.start()
 
     def _on_websocket_connected(self):
