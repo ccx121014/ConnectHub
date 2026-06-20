@@ -26,6 +26,7 @@ jobs:
 
     - name: Build Client
       run: |
+        cd "${{ github.workspace }}"
         pyinstaller --noconfirm --clean "client/app.py" ^
           --name "ConnectHub-Client" ^
           --windowed ^
@@ -36,9 +37,11 @@ jobs:
           --hidden-import PyQt5.QtCore ^
           --hidden-import PyQt5.QtGui ^
           --hidden-import PyQt5.QtWidgets
+      shell: cmd
 
     - name: Build Server
       run: |
+        cd "${{ github.workspace }}"
         pyinstaller --noconfirm --clean "server/main.py" ^
           --name "ConnectHub-Server" ^
           --console ^
@@ -46,18 +49,16 @@ jobs:
           --add-data "version.json;." ^
           --add-data "server/config.json;." ^
           --hidden-import websockets
+      shell: cmd
 
     - name: Create data directory
-      run: |
-        mkdir -p "dist/ConnectHub-Server/data"
+      run: mkdir -p "dist/ConnectHub-Server/data"
 
     - name: Zip Client
-      run: |
-        Compress-Archive -Path "dist/ConnectHub-Client/*" -DestinationPath "ConnectHub-Client.zip"
+      run: Compress-Archive -Path "dist/ConnectHub-Client/*" -DestinationPath "ConnectHub-Client.zip"
 
     - name: Zip Server
-      run: |
-        Compress-Archive -Path "dist/ConnectHub-Server/*" -DestinationPath "ConnectHub-Server.zip"
+      run: Compress-Archive -Path "dist/ConnectHub-Server/*" -DestinationPath "ConnectHub-Server.zip"
 
     - name: Upload to Release
       uses: softprops/action-gh-release@v2
