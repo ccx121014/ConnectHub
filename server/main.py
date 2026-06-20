@@ -358,13 +358,22 @@ class CollaborationServer:
     ):
         """Handle user list request"""
         username = message.sender
-        online_users = await self.user_manager.get_online_users()
+        all_users = []
+        try:
+            for uname, u in self.user_manager._users.items():
+                all_users.append({
+                    "username": uname,
+                    "status": u.status.value if hasattr(u, "status") else "offline",
+                    "last_seen": u.last_seen if hasattr(u, "last_seen") else time.time()
+                })
+        except Exception:
+            all_users = []
 
         response = create_message(
             MessageType.USER_LIST_RESPONSE,
             sender="server",
             target=username,
-            users=online_users,
+            users=all_users,
             timestamp=time.time()
         )
         await websocket.send(response.to_json())

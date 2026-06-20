@@ -130,9 +130,16 @@ class UserManager:
             for subscriber in self._status_subscribers[username]:
                 if subscriber in self._connections:
                     try:
-                        from .main import create_status_message
-                        msg = create_status_message(username, status)
-                        await self._connections[subscriber].send(msg.to_json() if hasattr(msg, 'to_json') else msg)
+                        import time, uuid, json
+                        msg = {
+                            "type": "user_status_update",
+                            "sender": username,
+                            "target": None,
+                            "payload": {"status": status.value},
+                            "timestamp": time.time(),
+                            "message_id": str(uuid.uuid4())
+                        }
+                        await self._connections[subscriber].send(json.dumps(msg))
                     except Exception:
                         pass
 

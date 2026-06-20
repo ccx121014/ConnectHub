@@ -498,7 +498,7 @@ class MainWindow(QMainWindow):
             elif message.type == MessageType.ERROR:
                 self._handle_error(message)
         except Exception as e:
-            logger.error(f"Error handling message: {e}")
+            logger.error(f"Error handling message: {e}", exc_info=True)
 
     def _handle_auth_response(self, message: Message):
         """Handle authentication response."""
@@ -545,19 +545,41 @@ class MainWindow(QMainWindow):
     def _handle_contact_list_response(self, message: Message):
         """Handle contact list response."""
         contacts = message.payload.get("contacts", [])
-        self.contact_list_widget.set_contacts(contacts)
+        if not isinstance(contacts, list):
+            contacts = []
+        # Normalize: ensure each contact is a dict with "username" and "status"
+        normalized = []
+        for c in contacts:
+            if isinstance(c, dict):
+                normalized.append({
+                    "username": c.get("username", ""),
+                    "status": c.get("status", "offline"),
+                    "last_seen": c.get("last_seen", None)
+                })
+            elif isinstance(c, str):
+                normalized.append({"username": c, "status": "offline", "last_seen": None})
+        self.contact_list_widget.set_contacts(normalized)
 
     def _handle_user_list_response(self, message: Message):
         """Handle user list response."""
         users = message.payload.get("users", [])
+        if not isinstance(users, list):
+            return
         for user_data in users:
-            username = user_data.get("username", "")
-            status_str = user_data.get("status", "offline")
+            if isinstance(user_data, dict):
+                username = user_data.get("username", "")
+                status_str = user_data.get("status", "offline")
+            elif isinstance(user_data, str):
+                username = user_data
+                status_str = "online"
+            else:
+                continue
             try:
                 status = UserStatus(status_str)
             except ValueError:
                 status = UserStatus.OFFLINE
-            self.contact_list_widget.update_contact_status(username, status)
+            if username:
+                self.contact_list_widget.update_contact_status(username, status)
 
     def _handle_file_transfer_request(self, message: Message):
         """Handle file transfer request."""
