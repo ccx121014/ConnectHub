@@ -1,0 +1,7 @@
+# Client dependencies
+PyQt5>=5.15.0
+websockets>=12.0
+aiortc>=1.9.0
+Pillow>=10.0.0
+numpy>=1.24.0
+opencv-python>=4.8.0
