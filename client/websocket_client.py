@@ -391,6 +391,27 @@ class WebSocketClient:
         )
         self.send(msg)
 
+    def send_file_transfer_data(self, target: str, file_id: str, chunk_index: int, data: str):
+        msg = create_message(
+            MessageType.FILE_TRANSFER_DATA,
+            sender=self._username or "",
+            target=target,
+            file_id=file_id,
+            chunk_index=chunk_index,
+            data=data,
+        )
+        self.send(msg)
+
+    def send_file_transfer_complete(self, target: str, file_id: str, total_chunks: int):
+        msg = create_message(
+            MessageType.FILE_TRANSFER_COMPLETE,
+            sender=self._username or "",
+            target=target,
+            file_id=file_id,
+            total_chunks=total_chunks,
+        )
+        self.send(msg)
+
     def send_desktop_share_request(self, target: str, share_type: str = "view"):
         msg = create_message(
             MessageType.DESKTOP_SHARE_REQUEST,
@@ -407,6 +428,25 @@ class WebSocketClient:
             target=target,
             accepted=accepted,
             share_type=share_type,
+        )
+        self.send(msg)
+
+    def send_desktop_frame(self, target: str, image_data: str, width: int, height: int):
+        msg = Message(
+            type=MessageType.DESKTOP_FRAME,
+            sender=self._username or "",
+            target=target,
+            payload={"image_data": image_data, "width": width, "height": height},
+            timestamp=time.time(),
+            message_id=str(uuid.uuid4()),
+        )
+        self.send(msg)
+
+    def send_desktop_stop(self, target: str):
+        msg = create_message(
+            MessageType.DESKTOP_STOP,
+            sender=self._username or "",
+            target=target,
         )
         self.send(msg)
 

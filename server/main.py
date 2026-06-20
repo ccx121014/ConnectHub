@@ -208,6 +208,36 @@ class CollaborationServer:
         elif msg_type == MessageType.WEBRTC_ICE_CANDIDATE:
             await self._handle_webrtc_ice_candidate(websocket, message)
 
+        # 文件传输消息 - 直接转发给目标用户
+        elif msg_type in [
+            MessageType.FILE_TRANSFER_REQUEST,
+            MessageType.FILE_TRANSFER_RESPONSE,
+            MessageType.FILE_TRANSFER_DATA,
+            MessageType.FILE_TRANSFER_COMPLETE,
+            MessageType.FILE_TRANSFER_CANCEL,
+            MessageType.FILE_TRANSFER_PROGRESS,
+        ]:
+            target = message.target
+            if target:
+                await self.user_manager.send_to_user(target, message.to_json())
+
+        # 远程桌面消息 - 直接转发给目标用户
+        elif msg_type in [
+            MessageType.DESKTOP_SHARE_REQUEST,
+            MessageType.DESKTOP_SHARE_RESPONSE,
+            MessageType.DESKTOP_STOP,
+            MessageType.DESKTOP_FRAME,
+            MessageType.DESKTOP_CONTROL_REQUEST,
+            MessageType.DESKTOP_CONTROL_RESPONSE,
+            MessageType.DESKTOP_MOUSE_MOVE,
+            MessageType.DESKTOP_MOUSE_CLICK,
+            MessageType.DESKTOP_MOUSE_RELEASE,
+            MessageType.DESKTOP_KEYBOARD,
+        ]:
+            target = message.target
+            if target:
+                await self.user_manager.send_to_user(target, message.to_json())
+
         return sender
 
     async def _handle_auth_request(

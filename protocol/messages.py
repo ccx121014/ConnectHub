@@ -54,6 +54,7 @@ class MessageType(Enum):
     DESKTOP_MOUSE_CLICK = "desktop_mouse_click"
     DESKTOP_MOUSE_RELEASE = "desktop_mouse_release"
     DESKTOP_KEYBOARD = "desktop_keyboard"
+    DESKTOP_FRAME = "desktop_frame"
 
     # WebRTC Signaling
     WEBRTC_OFFER = "webrtc_offer"

@@ -321,6 +321,8 @@ class ChatWidget(QWidget):
             return
 
         message_type = "text"
+        # 在本地显示自己发送的消息
+        self.add_message(self._username or "我", content)
         self.send_message.emit(self._current_target, content, message_type)
         self.message_input.clear()
         self.message_sent.emit()
