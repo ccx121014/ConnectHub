@@ -60,19 +60,18 @@ jobs:
     - name: Zip Server
       run: Compress-Archive -Path "dist/ConnectHub-Server/*" -DestinationPath "ConnectHub-Server.zip"
 
-    - name: Create Release
-      run: |
-        gh release create "${{ github.ref_name }}" \
-          --title "ConnectHub ${{ github.ref_name }}" \
-          --notes "ConnectHub ${{ github.ref_name }}" \
-          --draft=false \
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     - name: Upload to Release
-      run: |
-        gh release upload "${{ github.ref_name }}" \
-          "ConnectHub-Client.zip" \
-          "ConnectHub-Server.zip"
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: ConnectHub ${{ github.ref_name }}
+        body: |
+          ConnectHub ${{ github.ref_name }}
+          - 💬 即时聊天
+          - 📁 文件传输
+          - 🖥 远程桌面
+        files: |
+          ConnectHub-Client.zip
+          ConnectHub-Server.zip
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
