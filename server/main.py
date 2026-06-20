@@ -66,14 +66,24 @@ class CollaborationServer:
         """Start the WebSocket server"""
         logger.info(f"Starting WebSocket server on {HOST}:{PORT}")
 
-        async with websockets.serve(
-            self._handle_client,
-            HOST,
-            PORT,
-            ping_interval=HEARTBEAT_INTERVAL,
-            ping_timeout=10,
-            max_size=10 * 1024 * 1024
-        ):
+        try:
+            server = websockets.serve(
+                self._handle_client,
+                HOST,
+                PORT,
+                ping_interval=HEARTBEAT_INTERVAL,
+                ping_timeout=10,
+                max_size=10 * 1024 * 1024
+            )
+        except TypeError:
+            server = websockets.serve(
+                self._handle_client,
+                HOST,
+                PORT,
+                max_size=10 * 1024 * 1024
+            )
+
+        async with server:
             logger.info(f"Server started on ws://{HOST}:{PORT}")
             await asyncio.Future()
 

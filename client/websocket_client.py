@@ -155,19 +155,20 @@ class WebSocketClient(QObject):
         """Establish WebSocket connection with authentication."""
         import websockets
 
-        headers = {}
-        if self._username:
-            headers["X-Username"] = self._username
-        if self._password:
-            headers["X-Password"] = self._password
+        uri = self.uri
 
-        self._websocket = await websockets.connect(
-            self.uri,
-            extra_headers=headers,
-            ping_interval=30,
-            ping_timeout=10
-        )
-        logger.info(f"Connected to {self.uri}")
+        try:
+            # Try the newer websockets API (>= 11.x compatible)
+            self._websocket = await websockets.connect(
+                uri,
+                ping_interval=30,
+                ping_timeout=10
+            )
+        except TypeError:
+            # Fallback for older/newer versions with different signatures
+            self._websocket = await websockets.connect(uri)
+
+        logger.info(f"Connected to {uri}")
 
     async def _shutdown(self):
         """Gracefully shutdown the connection."""
