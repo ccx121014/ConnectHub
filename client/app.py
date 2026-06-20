@@ -7,15 +7,20 @@ import sys
 import logging
 import signal
 from typing import Optional
+from pathlib import Path
+
+# Add project root and client dir to path for module imports (cross-platform)
+_project_root = Path(__file__).parent.parent.resolve()
+sys.path.insert(0, str(_project_root))
+sys.path.insert(0, str(Path(__file__).parent))
 
 from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QFont
+from PyQt5.QtGui import QFont, QPixmap
 from PyQt5.QtWidgets import (
     QApplication,
     QMessageBox,
     QSplashScreen,
     QLabel,
-    QPixmap,
 )
 
 from protocol.messages import Message, MessageType
