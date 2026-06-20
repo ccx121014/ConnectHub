@@ -70,33 +70,36 @@ def check_for_update(update_url: Optional[str] = None, timeout: int = 8) -> Opti
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError):
-        # 网络不可用 / API 出错，静默忽略
+        return None
+
+    if not isinstance(data, dict):
         return None
 
     tag_name = data.get("tag_name", "").strip().lstrip("v")
     if not tag_name:
         return None
 
-    if _version_compare(tag_name, CURRENT_VERSION) > 0:
-        # 有新版本
-        assets = data.get("assets", []) or []
-        client_zip = None
-        for a in assets:
-            name = (a.get("name") or "").lower()
-            if "client" in name and name.endswith(".zip"):
-                client_zip = a.get("browser_download_url")
-                break
-        if not client_zip:
-            # 回退到发布页面（需要用户手动下载）
-            client_zip = data.get("html_url", "")
+    if _version_compare(tag_name, CURRENT_VERSION) <= 0:
+        return None
 
-        return {
-            "version": tag_name,
-            "download_url": client_zip,
-            "notes": data.get("body", "") or data.get("name", ""),
-            "release_page": data.get("html_url", ""),
-        }
-    return None
+    assets = data.get("assets", []) or []
+    client_zip = None
+    for a in assets:
+        if not isinstance(a, dict):
+            continue
+        name = (a.get("name") or "").lower()
+        if "client" in name and name.endswith(".zip"):
+            client_zip = a.get("browser_download_url")
+            break
+    if not client_zip:
+        client_zip = data.get("html_url", "")
+
+    return {
+        "version": tag_name,
+        "download_url": client_zip,
+        "notes": data.get("body", "") or data.get("name", ""),
+        "release_page": data.get("html_url", ""),
+    }
 
 
 def _version_compare(v1: str, v2: str) -> int:
