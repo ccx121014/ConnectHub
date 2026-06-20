@@ -32,6 +32,7 @@ from PyQt5.QtWidgets import (
     QInputDialog,
     QMessageBox,
     QLineEdit,
+    QPushButton,
 )
 
 
