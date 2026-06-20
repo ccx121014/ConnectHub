@@ -173,6 +173,11 @@ class CollaborationApp(QApplication):
     def _on_auth_success(self):
         """Handle successful authentication — open main window."""
         if self._login_dialog:
+            # 关键：先断开 finished 信号，避免 close() 同步触发 quit()
+            try:
+                self._login_dialog.finished.disconnect(self._on_login_dialog_finished)
+            except TypeError:
+                pass  # 信号未被连接
             self._login_dialog.close()
             self._login_dialog = None
 
