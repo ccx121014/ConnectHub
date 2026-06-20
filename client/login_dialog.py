@@ -4,16 +4,16 @@ Provides authentication UI with server address, username, and password fields.
 """
 
 from typing import Optional
-
+from pathlib import Path
+import sys as _sys
 
 # Add project root and client dir to path for module imports (cross-platform)
-from pathlib import Path
 _project_root = Path(__file__).parent.parent.resolve()
-import sys as _sys
 _sys.path.insert(0, str(_project_root))
 _sys.path.insert(0, str(Path(__file__).parent))
 
-from PyQt5.QtCore import pyqtSignal
+from PyQt5 import QtGui
+from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import (
     QDialog,
@@ -129,15 +129,12 @@ class LoginDialog(QDialog):
         # Progress bar for connection
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
-        self.progress_bar.setMaximum(0)
-        self.progress_bar.setMaximum(100)
         layout.addWidget(self.progress_bar)
 
     def _on_credentials_changed(self):
-        """Enable buttons only when credentials are entered."""
+        """Enable buttons when username is entered (password is optional)."""
         username = self.username_edit.text().strip()
-        password = self.password_edit.text()
-        has_credentials = bool(username and password)
+        has_credentials = bool(username)
         self.connect_button.setEnabled(has_credentials)
         self.register_button.setEnabled(has_credentials)
 
@@ -148,11 +145,10 @@ class LoginDialog(QDialog):
         )
 
     def _validate_inputs(self) -> bool:
-        """Validate all input fields."""
+        """Validate input fields (password is optional)."""
         server = self.server_edit.text().strip()
         port = self.port_spin.text().strip()
         username = self.username_edit.text().strip()
-        password = self.password_edit.text()
 
         if not server:
             QMessageBox.warning(self, "输入错误", "请输入服务器地址")
@@ -175,19 +171,9 @@ class LoginDialog(QDialog):
             self.username_edit.setFocus()
             return False
 
-        if len(username) < 3:
-            QMessageBox.warning(self, "输入错误", "用户名至少需要3个字符")
+        if len(username) < 2:
+            QMessageBox.warning(self, "输入错误", "用户名至少需要2个字符")
             self.username_edit.setFocus()
-            return False
-
-        if not password:
-            QMessageBox.warning(self, "输入错误", "请输入密码")
-            self.password_edit.setFocus()
-            return False
-
-        if len(password) < 6:
-            QMessageBox.warning(self, "输入错误", "密码至少需要6个字符")
-            self.password_edit.setFocus()
             return False
 
         return True
@@ -239,10 +225,9 @@ class LoginDialog(QDialog):
             self.progress_bar.setVisible(False)
 
     def _has_credentials(self) -> bool:
-        """Check if credentials are entered."""
+        """Check if username is entered."""
         username = self.username_edit.text().strip()
-        password = self.password_edit.text()
-        return bool(username and password)
+        return bool(username)
 
     def _load_settings(self):
         """Load saved settings if any."""
@@ -290,8 +275,3 @@ class LoginDialog(QDialog):
         """Handle dialog close."""
         self._save_settings()
         super().closeEvent(event)
-
-
-# Import Qt at the end to avoid issues
-from PyQt5 import QtGui
-from PyQt5.QtCore import Qt

@@ -63,29 +63,29 @@ class CollaborationServer:
             return self._client_locks[username]
 
     async def start(self):
-        """Start the WebSocket server"""
+        """Start the WebSocket server with version-compatible parameters."""
         logger.info(f"Starting WebSocket server on {HOST}:{PORT}")
 
-        try:
-            server = websockets.serve(
-                self._handle_client,
-                HOST,
-                PORT,
-                ping_interval=HEARTBEAT_INTERVAL,
-                ping_timeout=10,
-                max_size=10 * 1024 * 1024
-            )
-        except TypeError:
-            server = websockets.serve(
-                self._handle_client,
-                HOST,
-                PORT,
-                max_size=10 * 1024 * 1024
-            )
+        # Try various parameter sets for websockets version compatibility
+        server = None
+        for params in [
+            dict(ping_interval=HEARTBEAT_INTERVAL, ping_timeout=10, max_size=10*1024*1024),
+            dict(ping_timeout=10, max_size=10*1024*1024),
+            dict(max_size=10*1024*1024),
+            dict(),
+        ]:
+            try:
+                server = await websockets.serve(self._handle_client, HOST, PORT, **params)
+                logger.info(f"Server started on ws://{HOST}:{PORT} (params: {list(params.keys())})")
+                break
+            except (TypeError, ValueError) as e:
+                logger.debug(f"serve() params failed ({params}): {e}")
+                continue
 
-        async with server:
-            logger.info(f"Server started on ws://{HOST}:{PORT}")
-            await asyncio.Future()
+        if server is None:
+            raise RuntimeError(f"Could not start WebSocket server — all parameter sets failed")
+
+        await asyncio.Future()  # run forever
 
     async def _handle_client(self, websocket: object):
         """Handle a new client connection"""

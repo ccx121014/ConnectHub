@@ -55,9 +55,9 @@ class WebSocketClient(QObject):
         self._connected = False
         self._closing = False
         self._reconnect_attempt = 0
-        self._max_reconnect_attempts = 10
+        self._max_reconnect_attempts = 3
         self._base_reconnect_delay = 1
-        self._max_reconnect_delay = 60
+        self._max_reconnect_delay = 5
 
         self._thread: Optional[QThread] = None
         self._loop: Optional[asyncio.Event] = None
@@ -112,23 +112,25 @@ class WebSocketClient(QObject):
                 self._connected = True
                 self._reconnect_attempt = 0
                 self.connected.emit()
+                logger.info("WebSocket connection established, entering message loop")
 
-                async for message in self._websocket:
+                async for raw_message in self._websocket:
                     if self._closing:
                         break
-                    if message is None:
-                        break
                     try:
-                        parsed_message = parse_message(message)
+                        parsed_message = parse_message(raw_message)
+                        logger.debug(f"Received message: {parsed_message.type}")
                         self.message_received.emit(parsed_message)
                     except Exception as e:
                         logger.error(f"Error parsing message: {e}")
+
+                logger.info("WebSocket message loop ended")
 
             except asyncio.CancelledError:
                 logger.info("WebSocket connection cancelled")
                 break
             except Exception as e:
-                logger.error(f"WebSocket error: {e}")
+                logger.error(f"WebSocket connection error: {e}", exc_info=True)
                 self._connected = False
                 self.disconnected.emit()
 
@@ -147,28 +149,42 @@ class WebSocketClient(QObject):
                 self._base_reconnect_delay * (2 ** (self._reconnect_attempt - 1)),
                 self._max_reconnect_delay
             )
-            logger.info(f"Reconnecting in {delay} seconds (attempt {self._reconnect_attempt})")
+            logger.info(f"Reconnecting in {delay}s (attempt {self._reconnect_attempt})")
             self.reconnecting.emit(self._reconnect_attempt)
             await asyncio.sleep(delay)
 
     async def _connect(self):
-        """Establish WebSocket connection with authentication."""
+        """Establish WebSocket connection (with version fallback and timeout)."""
         import websockets
 
         uri = self.uri
+        logger.info(f"Connecting to WebSocket server: {uri}")
 
-        try:
-            # Try the newer websockets API (>= 11.x compatible)
-            self._websocket = await websockets.connect(
-                uri,
-                ping_interval=30,
-                ping_timeout=10
-            )
-        except TypeError:
-            # Fallback for older/newer versions with different signatures
-            self._websocket = await websockets.connect(uri)
+        # Try connecting with various parameter sets for version compatibility
+        conn = None
+        for params in [
+            dict(ping_interval=30, ping_timeout=10, close_timeout=5, open_timeout=10),
+            dict(ping_interval=30, ping_timeout=10),
+            dict(ping_timeout=10),
+            dict(),  # minimal fallback
+        ]:
+            try:
+                conn = await websockets.connect(uri, **params)
+                logger.info(f"Connected to {uri} (params: {list(params.keys())})")
+                break
+            except (TypeError, ValueError) as e:
+                logger.debug(f"Connect params failed ({params}): {e}")
+                continue
+            except Exception as e:
+                logger.warning(f"Connect failed with params {params}: {e}")
+                if not params:
+                    raise  # re-raise if even minimal params failed
+                continue
 
-        logger.info(f"Connected to {uri}")
+        if conn is None:
+            raise RuntimeError(f"Could not connect to {uri} — all parameter sets failed")
+
+        self._websocket = conn
 
     async def _shutdown(self):
         """Gracefully shutdown the connection."""
