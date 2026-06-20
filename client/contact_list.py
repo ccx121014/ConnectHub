@@ -52,7 +52,11 @@ class StatusColors:
 
 
 class ContactItem(QWidget):
-    """Custom widget for displaying a contact item with status indicator."""
+    """Custom widget showing contact info + action buttons (chat / file / desktop)."""
+
+    chat_clicked = pyqtSignal(str)
+    file_clicked = pyqtSignal(str)
+    desktop_clicked = pyqtSignal(str)
 
     def __init__(self, username: str, status: UserStatus = UserStatus.OFFLINE, parent=None):
         super().__init__(parent)
@@ -61,16 +65,17 @@ class ContactItem(QWidget):
         self._init_ui()
 
     def _init_ui(self):
-        """Initialize the user interface."""
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setContentsMargins(8, 6, 8, 6)
         layout.setSpacing(10)
 
+        # Status dot
         self.status_label = QLabel()
-        self.status_label.setFixedSize(12, 12)
+        self.status_label.setFixedSize(10, 10)
         self._update_status_indicator()
         layout.addWidget(self.status_label)
 
+        # Avatar
         self.avatar_label = QLabel()
         self.avatar_label.setFixedSize(32, 32)
         self.avatar_label.setStyleSheet(
@@ -81,6 +86,7 @@ class ContactItem(QWidget):
         self.avatar_label.setText(self.username[:1].upper() if self.username else "?")
         layout.addWidget(self.avatar_label)
 
+        # Text
         text_layout = QVBoxLayout()
         text_layout.setSpacing(2)
 
@@ -92,27 +98,61 @@ class ContactItem(QWidget):
         self.status_text.setStyleSheet("color: #757575; font-size: 11px;")
         text_layout.addWidget(self.status_text)
 
-        layout.addLayout(text_layout)
-        layout.addStretch()
+        layout.addLayout(text_layout, 1)
+
+        # Action buttons
+        btn_style = """
+            QPushButton {
+                background: transparent;
+                border: 1px solid #D0D0D0;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background: #E8F0FE;
+                border: 1px solid #4CAF50;
+            }
+            QPushButton:pressed {
+                background: #D8E8DD;
+            }
+        """
+
+        self.chat_btn = QPushButton("💬")
+        self.chat_btn.setToolTip("发送消息")
+        self.chat_btn.setFixedSize(32, 28)
+        self.chat_btn.setStyleSheet(btn_style)
+        self.chat_btn.clicked.connect(lambda: self.chat_clicked.emit(self.username))
+        layout.addWidget(self.chat_btn)
+
+        self.file_btn = QPushButton("📁")
+        self.file_btn.setToolTip("发送文件")
+        self.file_btn.setFixedSize(32, 28)
+        self.file_btn.setStyleSheet(btn_style)
+        self.file_btn.clicked.connect(lambda: self.file_clicked.emit(self.username))
+        layout.addWidget(self.file_btn)
+
+        self.desktop_btn = QPushButton("🖥")
+        self.desktop_btn.setToolTip("发起桌面共享")
+        self.desktop_btn.setFixedSize(32, 28)
+        self.desktop_btn.setStyleSheet(btn_style)
+        self.desktop_btn.clicked.connect(lambda: self.desktop_clicked.emit(self.username))
+        layout.addWidget(self.desktop_btn)
 
     def _update_status_indicator(self):
-        """Update the status indicator color."""
         color = getattr(StatusColors, self._status.name, StatusColors.OFFLINE)
-        style = "background-color: {}; border-radius: 6px; border: 1px solid rgba(0,0,0,0.1);".format(color)
+        style = "background-color: {}; border-radius: 5px;".format(color)
         self.status_label.setStyleSheet(style)
 
     def set_status(self, status: UserStatus):
-        """Set the user status."""
         self._status = status
         self._update_status_indicator()
         self.status_text.setText(status.value)
 
     def get_status(self) -> UserStatus:
-        """Get the current status."""
         return self._status
 
     def set_username(self, username: str):
-        """Set the username."""
         self.username = username
         self.username_label.setText(username)
         self.avatar_label.setText(username[:1].upper() if username else "?")
@@ -189,6 +229,18 @@ class ContactListWidget(QWidget):
     def set_username(self, username: str):
         """Set the current user name."""
         self._username = username
+
+    def _on_chat_clicked(self, username: str):
+        """Handle chat button clicked on a contact."""
+        self.start_chat_request.emit(username)
+
+    def _on_file_clicked(self, username: str):
+        """Handle file button clicked on a contact."""
+        self.start_file_transfer.emit(username)
+
+    def _on_desktop_clicked(self, username: str):
+        """Handle desktop button clicked on a contact."""
+        self.start_desktop_share.emit(username, "view")
 
     def _on_search_changed(self, text: str):
         """Handle search text changed."""
@@ -283,9 +335,12 @@ class ContactListWidget(QWidget):
 
             item = QListWidgetItem()
             item.setData(Qt.UserRole, username)
-            item.setSizeHint(QSize(0, 50))
+            item.setSizeHint(QSize(0, 52))
 
             contact_widget = ContactItem(username, contact_data["status"])
+            contact_widget.chat_clicked.connect(self._on_chat_clicked)
+            contact_widget.file_clicked.connect(self._on_file_clicked)
+            contact_widget.desktop_clicked.connect(self._on_desktop_clicked)
 
             self.list_widget.addItem(item)
             self.list_widget.setItemWidget(item, contact_widget)
