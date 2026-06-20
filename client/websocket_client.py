@@ -161,25 +161,34 @@ class WebSocketClient(QObject):
         """Connect to the server and process messages."""
         import websockets
 
+        # 先尝试最简参数，再尝试带 ping 参数；每组超时 5s — 避免用户等待过久
         conn = None
-        for params in [
-            dict(ping_interval=30, ping_timeout=10, close_timeout=5, open_timeout=10),
-            dict(ping_interval=30, ping_timeout=10),
+        param_sets = [
             dict(),
-        ]:
+            dict(ping_interval=30, ping_timeout=10),
+        ]
+        for params in param_sets:
+            if self._closing:
+                return
             try:
                 logger.info(f"Connecting to {self.uri} (params: {list(params.keys())})")
                 conn = await asyncio.wait_for(
                     websockets.connect(self.uri, **params),
-                    timeout=15,
+                    timeout=5,
                 )
                 logger.info(f"Connected to {self.uri}")
                 break
             except asyncio.TimeoutError:
-                logger.warning("Connection timed out")
+                logger.warning("Connection timed out (5s)")
                 continue
             except (TypeError, ValueError) as e:
                 logger.debug(f"Params failed ({params}): {e}")
+                continue
+            except ConnectionRefusedError:
+                logger.warning(f"Connection refused — is the server running at {self.uri}?")
+                continue
+            except OSError as e:
+                logger.warning(f"OS error connecting: {e}")
                 continue
             except Exception as e:
                 logger.warning(f"Connect failed: {e}")
