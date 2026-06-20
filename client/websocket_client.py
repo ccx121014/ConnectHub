@@ -60,6 +60,7 @@ class WebSocketClient:
 
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._main_task: Optional[asyncio.Task] = None
 
         self._username: Optional[str] = None
         self._password: Optional[str] = None
@@ -94,13 +95,14 @@ class WebSocketClient:
         logger.info(f"WebSocket client thread started for {self.uri}")
 
     def stop(self):
-        """停止客户端，不阻塞调用者。"""
+        """停止客户端 — 通过取消主协程让事件循环优雅结束，不阻塞调用者。"""
         logger.info("Stopping WebSocket client...")
         self._closing = True
         loop = self._loop
-        if loop and loop.is_running():
+        main_task = self._main_task
+        if loop and loop.is_running() and main_task and not main_task.done():
             try:
-                loop.call_soon_threadsafe(lambda: loop.stop())
+                loop.call_soon_threadsafe(main_task.cancel)
             except Exception:
                 pass
 
@@ -108,19 +110,41 @@ class WebSocketClient:
 
     def _run_event_loop(self):
         """后台线程中的 asyncio 事件循环。"""
+        loop = None
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             self._loop = loop
-            loop.run_until_complete(self._main_loop())
-        except Exception as e:
-            logger.error(f"Event loop crashed: {e}", exc_info=True)
-        finally:
+
+            main_task = loop.create_task(self._main_loop())
+            self._main_task = main_task
             try:
-                if self._loop and not self._loop.is_closed():
-                    self._loop.close()
-            except Exception:
+                loop.run_until_complete(main_task)
+            except asyncio.CancelledError:
                 pass
+            except Exception as e:
+                logger.error(f"Event loop crashed: {e}", exc_info=True)
+        finally:
+            self._main_task = None
+            if loop is not None:
+                try:
+                    # 收集所有未完成任务并取消它们，避免 Task was destroyed 警告
+                    pending = [
+                        t for t in asyncio.all_tasks(loop)
+                        if t is not main_task and not t.done()
+                    ]
+                    if pending:
+                        for t in pending:
+                            t.cancel()
+                        loop.run_until_complete(
+                            asyncio.gather(*pending, return_exceptions=True)
+                        )
+                except Exception:
+                    pass
+                try:
+                    loop.close()
+                except Exception:
+                    pass
             self._loop = None
             with self._state_lock:
                 self._connected = False
@@ -230,12 +254,13 @@ class WebSocketClient:
                     try:
                         self.signals.message_received.emit(parsed)
                     except RuntimeError:
-                        # 主线程 QObject 已销毁，停止处理
                         break
                 except Exception as e:
                     logger.warning(f"Failed to parse message: {e}")
         except websockets.exceptions.ConnectionClosed:
             logger.info("Server closed connection")
+        except asyncio.CancelledError:
+            raise  # 让上层 _main_loop 处理，同时触发 finally
         except Exception as e:
             logger.warning(f"Message loop error: {e}")
         finally:
