@@ -5,6 +5,14 @@ Provides authentication UI with server address, username, and password fields.
 
 from typing import Optional
 
+
+# Add project root and client dir to path for module imports (cross-platform)
+from pathlib import Path
+_project_root = Path(__file__).parent.parent.resolve()
+import sys as _sys
+_sys.path.insert(0, str(_project_root))
+_sys.path.insert(0, str(Path(__file__).parent))
+
 from PyQt5.QtCore import pyqtSignal
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import (

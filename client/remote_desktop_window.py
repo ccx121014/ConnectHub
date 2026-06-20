@@ -6,6 +6,14 @@ Main window for remote desktop view and control with WebRTC streaming
 from typing import Optional, Dict, Any, Callable
 from enum import Enum
 
+
+# Add project root and client dir to path for module imports (cross-platform)
+from pathlib import Path
+_project_root = Path(__file__).parent.parent.resolve()
+import sys as _sys
+_sys.path.insert(0, str(_project_root))
+_sys.path.insert(0, str(Path(__file__).parent))
+
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QSlider, QComboBox, QToolBar,
                              QStatusBar, QFrame, QSizePolicy, QMessageBox,

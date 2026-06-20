@@ -10,6 +10,14 @@ import threading
 from typing import Optional, Callable, Dict, Any
 from datetime import datetime
 
+
+# Add project root and client dir to path for module imports (cross-platform)
+from pathlib import Path
+_project_root = Path(__file__).parent.parent.resolve()
+import sys as _sys
+_sys.path.insert(0, str(_project_root))
+_sys.path.insert(0, str(Path(__file__).parent))
+
 from PyQt5.QtCore import QObject, pyqtSignal, QThread
 from PyQt5.QtWidgets import QMessageBox
 

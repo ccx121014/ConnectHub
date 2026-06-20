@@ -7,8 +7,16 @@ import logging
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
+
+# Add project root and client dir to path for module imports (cross-platform)
+from pathlib import Path
+_project_root = Path(__file__).parent.parent.resolve()
+import sys as _sys
+_sys.path.insert(0, str(_project_root))
+_sys.path.insert(0, str(Path(__file__).parent))
+
 from PyQt5.QtCore import Qt, pyqtSignal, QSize
-from PyQt5.QtGui import QFont, QColor, QTextCursor, QIcon, QAction
+from PyQt5.QtGui import QFont, QColor, QTextCursor, QIcon
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -29,6 +37,7 @@ from PyQt5.QtWidgets import (
     QSplitter,
     QSizePolicy,
     QApplication,
+    QAction,
 )
 
 from protocol.messages import Message, MessageType
