@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 
-CURRENT_VERSION = "1.0.0"
+CURRENT_VERSION = "1.0.3"
 
 # 版本检查 URL（GitHub Release 页面的 API）
 # 可通过 client/config.json 自定义

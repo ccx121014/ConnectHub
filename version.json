@@ -1,7 +1,7 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.3",
   "release_date": "2026-06-20",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.0.0/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.0.0/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub 首个正式版本，支持即时聊天、文件传输、远程桌面"
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.0.3/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.0.3/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.0.3 — 完全双击即用版"
 }
