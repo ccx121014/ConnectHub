@@ -223,24 +223,45 @@ class WebSocketClient(QObject):
     async def _send_async(self, message: Message):
         """Send a message (called within the event loop)."""
         ws = self._websocket
-        if ws and ws.open:
-            try:
-                await asyncio.wait_for(ws.send(message.to_json()), timeout=5)
-            except asyncio.TimeoutError:
-                logger.warning("Send timed out")
-            except Exception as e:
-                logger.warning(f"Send failed: {e}")
+        if not ws:
+            return
+        # 跨版本兼容地检查连接是否仍可用：
+        # - 旧版 websockets 使用 .open
+        # - 新版使用 .closed (bool) 或 .close_code
+        is_alive = True
+        if hasattr(ws, "closed") and isinstance(ws.closed, bool):
+            is_alive = not ws.closed
+        elif hasattr(ws, "open") and isinstance(ws.open, bool):
+            is_alive = ws.open
+        elif hasattr(ws, "close_code"):
+            is_alive = ws.close_code is None
+        if not is_alive:
+            return
+        try:
+            await asyncio.wait_for(ws.send(message.to_json()), timeout=5)
+        except asyncio.TimeoutError:
+            logger.warning("Send timed out")
+        except Exception as e:
+            logger.debug(f"Send failed: {e}")
 
     def send(self, message: Message):
         """Thread-safe: send a message from the Qt/UI thread."""
         loop = self._loop
-        if loop and loop.is_running() and self.is_connected:
+        if loop and loop.is_running() and self._websocket is not None:
             try:
-                loop.call_soon_threadsafe(
-                    lambda: asyncio.create_task(self._send_async(message))
+                # 使用 run_coroutine_threadsafe 以便有统一的异常出口
+                future = asyncio.run_coroutine_threadsafe(
+                    self._send_async(message), loop
                 )
+                # 无需等待结果，但加一个空回调避免"Future exception never retrieved"
+                def _on_done(f):
+                    try:
+                        f.result()
+                    except Exception:
+                        pass
+                future.add_done_callback(_on_done)
             except Exception as e:
-                logger.warning(f"Failed to queue message: {e}")
+                logger.debug(f"Failed to queue message: {e}")
         else:
             logger.debug("Cannot send: not connected or loop not running")
 
