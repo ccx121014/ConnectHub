@@ -1,0 +1,7 @@
+{
+  "server": "localhost",
+  "port": 8765,
+  "auto_update": true,
+  "update_check_interval": 3600,
+  "log_level": "INFO"
+}

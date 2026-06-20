@@ -24,16 +24,45 @@ from user_manager import UserManager, UserStatus
 from chat_history import ChatHistory, ChatMessage
 from webrtc_signaling import SignalingServer
 
+_config_path = Path(__file__).parent / "config.json"
+_default_config = {
+    "host": "0.0.0.0",
+    "port": 8765,
+    "heartbeat_interval": 30,
+    "auth_timeout": 60,
+    "log_file": "server.log",
+    "log_level": "INFO",
+}
+
+# 读取配置文件（若存在则覆盖默认值）
+try:
+    if _config_path.exists():
+        with open(_config_path, "r", encoding="utf-8") as _f:
+            _cfg = json.load(_f)
+            _default_config.update(_cfg)
+except Exception:
+    pass
+
+HOST = _default_config["host"]
+PORT = int(_default_config["port"])
+HEARTBEAT_INTERVAL = int(_default_config["heartbeat_interval"])
+AUTH_TIMEOUT = int(_default_config["auth_timeout"])
+
+# 配置日志
+log_handlers = [logging.StreamHandler()]
+try:
+    log_file = _default_config.get("log_file")
+    if log_file:
+        log_handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
+except Exception:
+    pass
+
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=getattr(logging, str(_default_config.get("log_level", "INFO")), logging.INFO),
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=log_handlers,
 )
 logger = logging.getLogger(__name__)
-
-HOST = "0.0.0.0"
-PORT = 8765
-HEARTBEAT_INTERVAL = 30
-AUTH_TIMEOUT = 60
 
 
 class CollaborationServer:

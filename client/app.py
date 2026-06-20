@@ -23,10 +23,11 @@ from PyQt5.QtWidgets import (
     QLabel,
 )
 
-from protocol.messages import Message, MessageType
+from protocol.messages import Message, MessageType, create_message
 from websocket_client import WebSocketClient
 from main_window import MainWindow
 from login_dialog import LoginDialog
+from updater import notify_update_async, CURRENT_VERSION
 
 # Configure logging
 logging.basicConfig(
@@ -46,8 +47,8 @@ class CollaborationApp(QApplication):
         super().__init__(argv)
 
         self.setApplicationName("在线协作套件")
-        self.setApplicationVersion("1.0.0")
-        self.setOrganizationName("CollaborationSuite")
+        self.setApplicationVersion(CURRENT_VERSION)
+        self.setOrganizationName("ConnectHub")
 
         # Set application font
         font = QFont()
@@ -67,7 +68,7 @@ class CollaborationApp(QApplication):
         signal.signal(signal.SIGINT, self._handle_signal)
         signal.signal(signal.SIGTERM, self._handle_signal)
 
-        logger.info("Application initialized")
+        logger.info("Application initialized (v%s)", CURRENT_VERSION)
 
     def _handle_signal(self, signum, frame):
         """Handle system signals for graceful shutdown."""
@@ -189,6 +190,13 @@ class CollaborationApp(QApplication):
 
         self._ws_client.request_contact_list()
         self._ws_client.request_user_list()
+
+        # 启动后异步检查是否有新版本
+        try:
+            from PyQt5.QtCore import QTimer
+            QTimer.singleShot(2000, lambda: notify_update_async(self._main_window))
+        except Exception:
+            pass
 
         logger.info("Main window displayed")
 
