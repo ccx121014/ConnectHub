@@ -96,72 +96,46 @@ class CollaborationApp(QApplication):
     def _on_connect_request(self, server: str, port: int, username: str, password: str):
         """Handle connect request from login dialog."""
         logger.info(f"Connect request: server={server}, port={port}, username={username}")
-
-        self._server = server
-        self._port = port
-        self._username = username
-
-        # Create WebSocket client
-        self._ws_client = WebSocketClient(server, port)
-        self._ws_client.set_credentials(username, password)
-
-        # Connect signals
-        self._ws_client.connected.connect(self._on_websocket_connected)
-        self._ws_client.error_occurred.connect(self._on_websocket_error)
-        self._ws_client.message_received.connect(self._on_message_received)
-        self._ws_client.connection_failed.connect(self._on_connection_failed)
-
-        # Start the WebSocket client
-        self._ws_client.start()
+        self._start_session(server, port, username, password, mode="connect")
 
     def _on_register_request(self, server: str, port: int, username: str, password: str):
         """Handle register request from login dialog."""
         logger.info(f"Register request: server={server}, port={port}, username={username}")
+        self._start_session(server, port, username, password, mode="register")
 
+    def _start_session(self, server: str, port: int, username: str, password: str, mode: str):
+        """Start a new WebSocket session."""
         self._server = server
         self._port = port
         self._username = username
+        self._mode = mode
 
-        # Create WebSocket client for registration
         self._ws_client = WebSocketClient(server, port)
         self._ws_client.set_credentials(username, password)
 
-        # Connect signals
-        self._ws_client.connected.connect(self._on_websocket_connected_for_register)
+        self._ws_client.connected.connect(self._on_websocket_connected)
         self._ws_client.error_occurred.connect(self._on_websocket_error)
         self._ws_client.message_received.connect(self._on_message_received)
         self._ws_client.connection_failed.connect(self._on_connection_failed)
-
-        # Start the WebSocket client
         self._ws_client.start()
 
     def _on_websocket_connected(self):
-        """Handle WebSocket connected event."""
+        """Handle WebSocket connected event — fire auth request."""
         logger.info("WebSocket connected")
         if self._login_dialog:
             self._login_dialog.show_success("连接成功!")
-
-        # Send auth request
         if self._ws_client and self._username:
-            self._ws_client.send_auth_request(self._username, "")
-
-    def _on_websocket_connected_for_register(self):
-        """Handle WebSocket connected event for registration."""
-        logger.info("WebSocket connected for registration")
-        if self._login_dialog:
-            self._login_dialog.show_success("连接成功，正在注册...")
-
-        # Send register request - using auth_request with register flag
-        if self._ws_client and self._username:
-            from protocol.messages import create_message
-            msg = create_message(
-                MessageType.AUTH_REQUEST,
-                sender=self._username,
-                username=self._username,
-                password="",
-                register=True
-            )
-            self._ws_client.send(msg)
+            if self._mode == "register":
+                msg = create_message(
+                    MessageType.AUTH_REQUEST,
+                    sender=self._username,
+                    username=self._username,
+                    password="",
+                    register=True,
+                )
+                self._ws_client.send(msg)
+            else:
+                self._ws_client.send_auth_request(self._username, "")
 
     def _on_websocket_error(self, error: str):
         """Handle WebSocket error."""
@@ -175,41 +149,38 @@ class CollaborationApp(QApplication):
         if self._login_dialog:
             self._login_dialog.show_error(error)
 
-    def _on_message_received(self, message: Message):
-        """Handle received message."""
+    def _on_message_received(self, message):
+        """Handle received message during login phase."""
         logger.debug(f"Message received: {message.type}")
 
-        # Handle auth response
-        if message.type == MessageType.AUTH_RESPONSE:
-            success = message.payload.get("success", False)
-            if success:
-                logger.info("Authentication successful")
-                self._on_auth_success()
-            else:
-                error = message.payload.get("error", "认证失败")
-                logger.error(f"Authentication failed: {error}")
-                if self._login_dialog:
-                    self._login_dialog.show_error(error)
-                # Stop the WebSocket client
-                if self._ws_client:
-                    self._ws_client.stop()
-                    self._ws_client = None
+        if message.type != MessageType.AUTH_RESPONSE:
+            return
+
+        success = message.payload.get("success", False)
+        if success:
+            logger.info("Authentication successful")
+            self._on_auth_success()
+        else:
+            error = message.payload.get("error", "认证失败")
+            logger.error(f"Authentication failed: {error}")
+            if self._login_dialog:
+                self._login_dialog.show_error(error)
+            if self._ws_client:
+                self._ws_client.stop()
+                self._ws_client = None
 
     def _on_auth_success(self):
-        """Handle successful authentication."""
-        # Close login dialog
+        """Handle successful authentication — open main window."""
         if self._login_dialog:
             self._login_dialog.close()
             self._login_dialog = None
 
-        # Create and show main window
         self._main_window = MainWindow()
         self._main_window.set_username(self._username)
         self._main_window.set_websocket_client(self._ws_client)
         self._main_window.logout_requested.connect(self._on_logout_requested)
         self._main_window.show()
 
-        # Request initial data
         self._ws_client.request_contact_list()
         self._ws_client.request_user_list()
 

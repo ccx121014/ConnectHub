@@ -475,9 +475,9 @@ class MainWindow(QMainWindow):
         if self._ws_client and content:
             self._ws_client.send_chat_message(target, content)
 
-    @pyqtSlot(Message)
-    def _on_message_received(self, message: Message):
-        """Handle incoming message."""
+    @pyqtSlot(object)
+    def _on_message_received(self, message):
+        """Handle incoming message from the WebSocket thread."""
         try:
             if message.type == MessageType.AUTH_RESPONSE:
                 self._handle_auth_response(message)
