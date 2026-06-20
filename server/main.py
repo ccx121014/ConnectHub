@@ -45,7 +45,7 @@ class CollaborationServer:
         self.signaling_server = SignalingServer(self.user_manager)
         self.signaling_server.set_message_handler(self._relay_signaling_message)
 
-        self._authenticated_clients: Dict[str, asyncio.WebSocket] = {}
+        self._authenticated_clients: Dict[str, object] = {}
         self._pending_auth: Dict[str, asyncio.Queue] = {}
         self._heartbeat_tasks: Dict[str, asyncio.Task] = {}
         self._client_locks: Dict[str, asyncio.Lock] = {}
@@ -77,7 +77,7 @@ class CollaborationServer:
             logger.info(f"Server started on ws://{HOST}:{PORT}")
             await asyncio.Future()
 
-    async def _handle_client(self, websocket: asyncio.WebSocket):
+    async def _handle_client(self, websocket: object):
         """Handle a new client connection"""
         client_id = str(uuid.uuid4())
         username = None
@@ -125,7 +125,7 @@ class CollaborationServer:
 
     async def _process_message(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         message: Message,
         current_username: Optional[str]
     ) -> Optional[str]:
@@ -202,7 +202,7 @@ class CollaborationServer:
 
     async def _handle_auth_request(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         message: Message
     ) -> Optional[str]:
         """Handle authentication request"""
@@ -247,7 +247,7 @@ class CollaborationServer:
 
     async def _handle_logout(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         message: Message
     ):
         """Handle logout request"""
@@ -282,7 +282,7 @@ class CollaborationServer:
 
     async def _handle_heartbeat(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         message: Message
     ):
         """Handle heartbeat ping"""
@@ -324,7 +324,7 @@ class CollaborationServer:
 
     async def _handle_status_update(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         message: Message
     ):
         """Handle user status update"""
@@ -343,7 +343,7 @@ class CollaborationServer:
 
     async def _handle_user_list_request(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         message: Message
     ):
         """Handle user list request"""
@@ -361,7 +361,7 @@ class CollaborationServer:
 
     async def _handle_contact_list_request(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         message: Message
     ):
         """Handle contact list request"""
@@ -379,7 +379,7 @@ class CollaborationServer:
 
     async def _handle_chat_message(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         message: Message
     ):
         """Handle direct chat message"""
@@ -413,7 +413,7 @@ class CollaborationServer:
 
     async def _handle_chat_history_request(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         message: Message
     ):
         """Handle chat history request"""
@@ -445,7 +445,7 @@ class CollaborationServer:
 
     async def _handle_group_create(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         message: Message
     ):
         """Handle group creation request"""
@@ -494,7 +494,7 @@ class CollaborationServer:
 
     async def _handle_group_join(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         message: Message
     ):
         """Handle group join request"""
@@ -548,7 +548,7 @@ class CollaborationServer:
 
     async def _handle_group_leave(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         message: Message
     ):
         """Handle group leave request"""
@@ -599,7 +599,7 @@ class CollaborationServer:
 
     async def _handle_group_message(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         message: Message
     ):
         """Handle group message"""
@@ -661,7 +661,7 @@ class CollaborationServer:
 
     async def _handle_webrtc_offer(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         message: Message
     ):
         """Handle WebRTC offer"""
@@ -696,7 +696,7 @@ class CollaborationServer:
 
     async def _handle_webrtc_answer(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         message: Message
     ):
         """Handle WebRTC answer"""
@@ -731,7 +731,7 @@ class CollaborationServer:
 
     async def _handle_webrtc_ice_candidate(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         message: Message
     ):
         """Handle WebRTC ICE candidate"""
@@ -760,7 +760,7 @@ class CollaborationServer:
 
     async def _send_error(
         self,
-        websocket: asyncio.WebSocket,
+        websocket: object,
         error_message: str,
         message_id: Optional[str] = None
     ):

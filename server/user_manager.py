@@ -36,7 +36,7 @@ class UserManager:
         """Initialize user manager with storage path"""
         self.storage_path = storage_path
         self._users: Dict[str, User] = {}
-        self._connections: Dict[str, asyncio.WebSocket] = {}
+        self._connections: Dict[str, object] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
         self._global_lock = asyncio.Lock()
         self._status_subscribers: Dict[str, Set[str]] = {}  # user -> set of users who subscribed
@@ -251,7 +251,7 @@ class UserManager:
         user = self._users.get(username)
         return user.groups if user else set()
 
-    async def get_connection(self, username: str) -> Optional[asyncio.WebSocket]:
+    async def get_connection(self, username: str) -> Optional[object]:
         """Get websocket connection for a user"""
         return self._connections.get(username)
 
