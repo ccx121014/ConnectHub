@@ -10,11 +10,14 @@ import json
 import time
 import sys
 import uuid
+import os
+from pathlib import Path
 from typing import Optional, Set, Dict, Any
 
-sys.path.insert(0, '/workspace')
-sys.path.insert(0, '/workspace/server')
-sys.path.insert(0, '/workspace/protocol')
+# Add project root to path for module imports
+_project_root = Path(__file__).parent.parent.resolve()
+sys.path.insert(0, str(_project_root))
+sys.path.insert(0, str(Path(__file__).parent))
 
 from protocol.messages import Message, MessageType, create_message, parse_message
 from user_manager import UserManager, UserStatus

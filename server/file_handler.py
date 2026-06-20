@@ -16,8 +16,13 @@ from typing import Dict, Optional, Any, List, Callable
 from pathlib import Path
 
 import sys
-sys.path.insert(0, '/workspace')
-sys.path.insert(0, '/workspace/server')
+import os
+from pathlib import Path
+
+# Add project root to path for module imports
+_project_root = Path(__file__).parent.parent.resolve()
+sys.path.insert(0, str(_project_root))
+sys.path.insert(0, str(Path(__file__).parent))
 
 from protocol.messages import Message, MessageType, create_message
 
