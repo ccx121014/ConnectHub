@@ -1,8 +1,8 @@
 """
 WebSocket Client for Online Collaboration Suite
 - 关键点：
-  * WebSocketClient 是纯 Python 对象（不继承 QObject）——避免 Qt 线程亲和/对象生命周期问题）
-  * 所有跨线程信号由独立的 SignalBridge(QObject) 承载
+  * WebSocketClient 是纯 Python 对象（不继承 QObject）——避免 Qt 线程亲和/对象生命周期问题
+  * 所有跨线程信号由独立的 SignalBridge 承载（纯 Python 实现，无 Qt 依赖）
   * asyncio 事件循环运行在独立的 Python daemon thread 中，与 Qt 主线程完全隔离
 """
 
@@ -19,30 +19,16 @@ _project_root = Path(__file__).parent.parent.resolve()
 _sys.path.insert(0, str(_project_root))
 _sys.path.insert(0, str(Path(__file__).parent))
 
-from PyQt5.QtCore import QObject, pyqtSignal  # 仅用于 SignalBridge
-
+from protocol.signals import Signal, SignalBridge
 from protocol.messages import Message, MessageType, parse_message, create_message
 
 logger = logging.getLogger(__name__)
 
 
-class SignalBridge(QObject):
-    """
-    专用于承载跨线程信号 — 仅在主线程创建并持有。
-    子线程只负责 emit，槽也在主线程被 Qt 自动排队执行。
-    """
-    connected = pyqtSignal()
-    disconnected = pyqtSignal()
-    error_occurred = pyqtSignal(str)
-    message_received = pyqtSignal(object)    # Message 以 object 透传
-    reconnecting = pyqtSignal(int)
-    connection_failed = pyqtSignal(str)
-
-
 class WebSocketClient:
     """
     纯 Python WebSocket 客户端，不继承 QObject。
-    通过 self.signals (SignalBridge) 与 Qt 交互。
+    通过 self.signals (SignalBridge) 与上层 UI 交互。
     """
 
     def __init__(self, host: str = "localhost", port: int = 8765):
@@ -50,7 +36,6 @@ class WebSocketClient:
         self.port = port
         self.uri = f"ws://{host}:{port}"
 
-        # 唯一的 QObject 子类，必须在创建者（主线程）创建
         self.signals = SignalBridge()
 
         self._websocket = None
@@ -112,6 +97,7 @@ class WebSocketClient:
     def _run_event_loop(self):
         """后台线程中的 asyncio 事件循环。"""
         loop = None
+        main_task = None
         try:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -129,7 +115,6 @@ class WebSocketClient:
             self._main_task = None
             if loop is not None:
                 try:
-                    # 收集所有未完成任务并取消它们，避免 Task was destroyed 警告
                     pending = [
                         t for t in asyncio.all_tasks(loop)
                         if t is not main_task and not t.done()
@@ -170,19 +155,12 @@ class WebSocketClient:
             if self._reconnect_attempt > self._max_reconnect_attempts:
                 error_msg = f"连接失败：无法连接到 {self.uri}"
                 logger.error(error_msg)
-                try:
-                    self.signals.connection_failed.emit(error_msg)
-                except RuntimeError:
-                    # QObject 已被销毁
-                    pass
+                self.signals.connection_failed.emit(error_msg)
                 break
 
             delay = min(1 * self._reconnect_attempt, 3)
             logger.info(f"Reconnecting in {delay}s (attempt {self._reconnect_attempt})")
-            try:
-                self.signals.reconnecting.emit(self._reconnect_attempt)
-            except RuntimeError:
-                pass
+            self.signals.reconnecting.emit(self._reconnect_attempt)
 
             try:
                 await asyncio.sleep(delay)
@@ -192,10 +170,7 @@ class WebSocketClient:
         with self._state_lock:
             if self._connected:
                 self._connected = False
-                try:
-                    self.signals.disconnected.emit()
-                except RuntimeError:
-                    pass
+                self.signals.disconnected.emit()
 
     async def _connect_and_run(self):
         """连接并处理消息。"""
@@ -240,10 +215,7 @@ class WebSocketClient:
         with self._state_lock:
             self._connected = True
 
-        try:
-            self.signals.connected.emit()
-        except RuntimeError:
-            pass
+        self.signals.connected.emit()
 
         try:
             async for raw_message in conn:
@@ -252,16 +224,13 @@ class WebSocketClient:
                 try:
                     parsed = parse_message(raw_message)
                     logger.debug(f"Received: {parsed.type}")
-                    try:
-                        self.signals.message_received.emit(parsed)
-                    except RuntimeError:
-                        break
+                    self.signals.message_received.emit(parsed)
                 except Exception as e:
                     logger.warning(f"Failed to parse message: {e}")
         except websockets.exceptions.ConnectionClosed:
             logger.info("Server closed connection")
         except asyncio.CancelledError:
-            raise  # 让上层 _main_loop 处理，同时触发 finally
+            raise
         except Exception as e:
             logger.warning(f"Message loop error: {e}")
         finally:
@@ -272,17 +241,13 @@ class WebSocketClient:
             except Exception:
                 pass
             self._websocket = None
-            try:
-                self.signals.disconnected.emit()
-            except RuntimeError:
-                pass
+            self.signals.disconnected.emit()
 
     async def _send_async(self, message: Message):
         """在事件循环内部发送消息。"""
         ws = self._websocket
         if not ws:
             return
-        # 检查连接是否仍可用
         is_alive = True
         if hasattr(ws, "closed") and isinstance(ws.closed, bool):
             is_alive = not ws.closed

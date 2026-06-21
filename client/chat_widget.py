@@ -1,467 +1,500 @@
 """
-Chat Widget for Online Collaboration Suite
+Chat Widget for Online Collaboration Suite (Tkinter version)
 Provides 1:1 and group chat functionality with message display and input.
 """
 
-import logging
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-
 # Add project root and client dir to path for module imports (cross-platform)
 from pathlib import Path
-_project_root = Path(__file__).parent.parent.resolve()
 import sys as _sys
+
+_project_root = Path(__file__).parent.parent.resolve()
 _sys.path.insert(0, str(_project_root))
 _sys.path.insert(0, str(Path(__file__).parent))
 
-from PyQt5.QtCore import Qt, pyqtSignal, QSize
-from PyQt5.QtGui import QFont, QColor, QTextCursor, QIcon
-from PyQt5.QtWidgets import (
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QTextEdit,
-    QLineEdit,
-    QPushButton,
-    QToolButton,
-    QLabel,
-    QMenu,
-    QScrollArea,
-    QFrame,
-    QFileDialog,
-    QMessageBox,
-    QTabWidget,
-    QListWidget,
-    QListWidgetItem,
-    QSplitter,
-    QSizePolicy,
-    QApplication,
-    QAction,
-)
-
-from protocol.messages import Message, MessageType
-
-logger = logging.getLogger(__name__)
+from protocol.signals import Signal
 
 
-class ChatMessage(QFrame):
-    """
-    Widget for displaying a single chat message.
+class BubbleMessage(tk.Frame):
+    """A single bubble-style message widget.
+
+    Renders either on the left (incoming) or right (own) side.
     """
 
-    def __init__(
-        self,
-        username: str,
-        content: str,
-        timestamp: datetime,
-        is_own: bool = False,
-        message_type: str = "text",
-        parent=None
-    ):
-        super().__init__(parent)
+    def __init__(self, master, username: str, content: str,
+                 timestamp: datetime = None, is_own: bool = False,
+                 message_type: str = "text"):
+        super().__init__(master, bg="#F9F9FB")
         self.username = username
         self.content = content
-        self.timestamp = timestamp
+        self.timestamp = timestamp or datetime.now()
         self.is_own = is_own
         self.message_type = message_type
 
         self._init_ui()
 
     def _init_ui(self):
-        """Initialize the user interface."""
-        self.setFrameStyle(QFrame.StyledPanel | QFrame.Raised)
-        self.setLineWidth(1)
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 5, 10, 5)
-        layout.setSpacing(2)
-
-        # Header with username and timestamp
-        header_layout = QHBoxLayout()
-
-        username_label = QLabel(self.username)
-        username_label.setStyleSheet("font-weight: bold; color: #1976D2;")
-        header_layout.addWidget(username_label)
-
-        header_layout.addStretch()
-
-        time_label = QLabel(self.timestamp.strftime("%H:%M:%S"))
-        time_label.setStyleSheet("color: #9E9E9E; font-size: 10px;")
-        header_layout.addWidget(time_label)
-
-        layout.addLayout(header_layout)
-
-        # Message content
-        content_label = QLabel(self.content)
-        content_label.setWordWrap(True)
-        content_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        content_label.setStyleSheet("""
-            background-color: #F5F5F5;
-            padding: 8px;
-            border-radius: 5px;
-        """ if not self.is_own else """
-            background-color: #E3F2FD;
-            padding: 8px;
-            border-radius: 5px;
-        """)
-        layout.addWidget(content_label)
-
-        # Apply alignment based on own/other message
-        if self.is_own:
-            self.setStyleSheet("""
-                ChatMessage {
-                    background-color: #E3F2FD;
-                    border-radius: 10px;
-                    border: 1px solid #BBDEFB;
-                }
-            """)
+        if self.message_type == "system":
+            bubble_bg = "#FFF8E1"
+            border_color = "#FFE082"
+            fg = "#795548"
+        elif self.is_own:
+            bubble_bg = "#E3F2FD"
+            border_color = "#BBDEFB"
+            fg = "#0D47A1"
         else:
-            self.setStyleSheet("""
-                ChatMessage {
-                    background-color: #FFFFFF;
-                    border-radius: 10px;
-                    border: 1px solid #E0E0E0;
-                }
-            """)
+            bubble_bg = "#FFFFFF"
+            border_color = "#E0E0E0"
+            fg = "#212121"
+
+        # Outer row container (for left/right alignment of whole bubble)
+        outer = tk.Frame(self, bg="#F9F9FB")
+        outer.pack(fill="x", pady=4)
+
+        if self.is_own:
+            # Push bubble to the right
+            outer.pack(fill="x", padx=(80, 10))
+        else:
+            outer.pack(fill="x", padx=(10, 80))
+
+        # Bubble container
+        bubble = tk.Frame(outer, bg=bubble_bg,
+                          highlightthickness=1,
+                          highlightbackground=border_color)
+
+        if self.is_own:
+            bubble.pack(side="right", anchor="e")
+        else:
+            bubble.pack(side="left", anchor="w")
+
+        # Header: username + timestamp
+        header = tk.Frame(bubble, bg=bubble_bg)
+        header.pack(fill="x", padx=8, pady=(6, 2))
+
+        user_label = tk.Label(
+            header, text=self.username, bg=bubble_bg, fg=fg,
+            font=("TkDefaultFont", 9, "bold"), anchor="w"
+        )
+        if self.is_own:
+            user_label.pack(side="right")
+        else:
+            user_label.pack(side="left")
+
+        # Content (selectable Text widget)
+        content_text = tk.Text(
+            bubble, wrap="word", height=1, bd=0,
+            bg=bubble_bg, fg=fg,
+            font=("TkDefaultFont", 10),
+            highlightthickness=0,
+            padx=8, pady=2,
+            cursor="xterm"
+        )
+        content_text.insert("1.0", self.content)
+        content_text.configure(state="disabled")
+        # Auto-size height based on content length
+        line_count = max(1, (len(self.content) // 60) + self.content.count("\n") + 1)
+        line_count = min(line_count, 15)
+        content_text.configure(height=line_count)
+        content_text.pack(fill="x", padx=4, pady=(0, 2))
+
+        # Timestamp footer
+        ts_text = self.timestamp.strftime("%H:%M:%S")
+        ts_label = tk.Label(
+            bubble, text=ts_text, bg=bubble_bg, fg="#9E9E9E",
+            font=("TkDefaultFont", 7)
+        )
+        if self.is_own:
+            ts_label.pack(side="right", padx=8, pady=(0, 6))
+        else:
+            ts_label.pack(side="left", padx=8, pady=(0, 6))
 
 
-class ChatHistory(QScrollArea):
-    """
-    Scrollable area for displaying chat messages.
-    """
+class ChatHistory(ttk.Frame):
+    """Scrollable message list."""
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._messages: List[ChatMessage] = []
+    def __init__(self, master, **kwargs):
+        super().__init__(master, **kwargs)
+        self._messages: List[BubbleMessage] = []
 
-        self.setWidgetResizable(True)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOn)
+        # Canvas + scrollbar + inner frame for scrolling
+        self.canvas = tk.Canvas(self, bg="#F9F9FB", highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(self, orient="vertical",
+                                       command=self.canvas.yview)
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
 
-        self.content_widget = QWidget()
-        self.content_layout = QVBoxLayout(self.content_widget)
-        self.content_layout.setAlignment(Qt.AlignTop)
-        self.content_layout.setSpacing(10)
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
 
-        self.setWidget(self.content_widget)
+        self.inner = tk.Frame(self.canvas, bg="#F9F9FB")
+        self._inner_window = self.canvas.create_window(
+            (0, 0), window=self.inner, anchor="nw"
+        )
+        self.inner.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+        self.canvas.bind(
+            "<Configure>",
+            lambda e: self.canvas.itemconfigure(self._inner_window, width=e.width)
+        )
 
-    def add_message(self, message: ChatMessage):
-        """Add a message to the chat history."""
-        self._messages.append(message)
-        self.content_layout.addWidget(message)
+        # Mouse wheel
+        self._bind_mousewheel(self.canvas)
+        self._bind_mousewheel(self.inner)
+
+    def _bind_mousewheel(self, widget):
+        def _on_wheel(event):
+            if event.num == 4:
+                self.canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                self.canvas.yview_scroll(1, "units")
+            else:
+                self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        widget.bind("<MouseWheel>", _on_wheel)
+        widget.bind("<Button-4>", _on_wheel)
+        widget.bind("<Button-5>", _on_wheel)
+
+    def add_message(self, bubble: BubbleMessage):
+        bubble.pack(fill="x", padx=4, pady=2)
+        self._messages.append(bubble)
         self._scroll_to_bottom()
 
     def clear_messages(self):
-        """Clear all messages."""
         for msg in self._messages:
-            msg.deleteLater()
+            msg.destroy()
         self._messages.clear()
-        while self.content_layout.count():
-            item = self.content_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
 
     def _scroll_to_bottom(self):
-        """Scroll to the bottom of the chat history."""
-        scrollbar = self.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        self.update_idletasks()
+        self.canvas.yview_moveto(1.0)
 
 
-class ChatWidget(QWidget):
-    """
-    Chat widget for 1:1 and group chats.
+class ChatWidget(ttk.Frame):
+    """Single chat conversation widget.
+
     Signals:
-        send_message: Emitted with (target, content, message_type) when sending a message
-        send_file_request: Emitted with (target,) when file transfer is requested
-        message_sent: Emitted when a message is successfully sent
+        message_sent (str, str)  — (target, content)
+        send_file_request (str)  — (target)
+
+    Methods:
+        set_username(username)
+        set_chat_target(target, is_group=False)
+        add_message(username, content, timestamp=None, message_type='text')
+        add_system_message(content)
+        clear_chat()
+        close()
     """
 
-    send_message = pyqtSignal(str, str, str)
-    send_file_request = pyqtSignal(str)
-    message_sent = pyqtSignal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
+    def __init__(self, master=None, **kwargs):
+        super().__init__(master, **kwargs)
         self._current_target: Optional[str] = None
-        self._is_group_chat = False
+        self._is_group_chat: bool = False
         self._username: Optional[str] = None
         self._message_history: Dict[str, List[Tuple[str, str, datetime]]] = {}
+
+        # Signals
+        self.message_sent = Signal(str, str)
+        self.send_file_request = Signal(str)
+
+        # UI
+        self._init_ui()
+
+    # ---------- UI ----------
+    def _init_ui(self):
+        # Header bar
+        self.header = tk.Frame(self, bg="#FAFAFA",
+                               highlightthickness=1,
+                               highlightbackground="#E0E0E0")
+        self.header.pack(fill="x")
+
+        self.title_label = tk.Label(
+            self.header, text="聊天", bg="#FAFAFA",
+            fg="#212121", font=("TkDefaultFont", 11, "bold"),
+            anchor="w", padx=10, pady=6
+        )
+        self.title_label.pack(side="left")
+
+        # Chat history
+        self.chat_history = ChatHistory(self)
+        self.chat_history.pack(fill="both", expand=True, padx=2, pady=2)
+
+        # Input area
+        input_frame = tk.Frame(self, bg="#FAFAFA",
+                               highlightthickness=1,
+                               highlightbackground="#E0E0E0")
+        input_frame.pack(fill="x", padx=2, pady=(0, 2))
+
+        # File button row
+        file_row = tk.Frame(input_frame, bg="#FAFAFA")
+        file_row.pack(fill="x", padx=6, pady=(6, 2))
+
+        self.file_button = tk.Button(
+            file_row, text="📎 发送文件", bd=0,
+            bg="#FAFAFA", activebackground="#E3F2FD",
+            fg="#1565C0", font=("TkDefaultFont", 9),
+            command=self._on_file_button_clicked, cursor="hand2"
+        )
+        self.file_button.pack(side="right")
+
+        # Message input + send button row
+        msg_row = tk.Frame(input_frame, bg="#FAFAFA")
+        msg_row.pack(fill="x", padx=6, pady=(2, 6))
+
+        self.message_input = tk.Text(
+            msg_row, wrap="word", height=2, bd=1,
+            bg="#FFFFFF", fg="#212121",
+            font=("TkDefaultFont", 10),
+            highlightthickness=1,
+            highlightbackground="#E0E0E0",
+            highlightcolor="#2196F3",
+            insertbackground="#212121",
+            cursor="xterm",
+            padx=6, pady=6,
+        )
+        self.message_input.pack(side="left", fill="both", expand=True,
+                                padx=(0, 6))
+
+        # Enter to send (Shift+Enter for newline)
+        self.message_input.bind("<Return>", self._on_enter_key)
+        self.message_input.bind("<Shift-Return>", lambda e: None)
+        self.message_input.bind("<KeyRelease>", lambda e: self._update_send_state())
+
+        self.send_button = tk.Button(
+            msg_row, text="发送", bd=0,
+            bg="#2E7D32", fg="#FFFFFF", activebackground="#388E3C",
+            activeforeground="#FFFFFF",
+            font=("TkDefaultFont", 10, "bold"),
+            padx=16, pady=8, cursor="hand2",
+            command=self._on_send_clicked
+        )
+        self.send_button.pack(side="right")
+        self.send_button.configure(state="disabled")
+
+    # ---------- Public API ----------
+    def set_username(self, username: str):
+        self._username = username
+
+    def set_chat_target(self, target: str, is_group: bool = False):
+        self._current_target = target
+        self._is_group_chat = is_group
+        title = f"群聊: {target}" if is_group else f"与 {target} 的聊天"
+        self.title_label.configure(text=title)
+
+    def add_message(self, username: str, content: str,
+                    timestamp: datetime = None, message_type: str = "text"):
+        """Add a message to the chat history (thread-safe via after())."""
+        def _do():
+            ts = timestamp if timestamp is not None else datetime.now()
+            is_own = (username == self._username)
+            bubble = BubbleMessage(
+                self.chat_history.inner,
+                username=username,
+                content=content,
+                timestamp=ts,
+                is_own=is_own,
+                message_type=message_type,
+            )
+            self.chat_history.add_message(bubble)
+
+            # Append to history
+            if self._current_target:
+                if self._current_target not in self._message_history:
+                    self._message_history[self._current_target] = []
+                self._message_history[self._current_target].append(
+                    (username, content, ts)
+                )
+
+        self._run_on_ui_thread(_do)
+
+    def add_system_message(self, content: str):
+        def _do():
+            bubble = BubbleMessage(
+                self.chat_history.inner,
+                username="系统",
+                content=content,
+                timestamp=datetime.now(),
+                is_own=False,
+                message_type="system",
+            )
+            self.chat_history.add_message(bubble)
+        self._run_on_ui_thread(_do)
+
+    def clear_chat(self):
+        self.chat_history.clear_messages()
+
+    def close(self):
+        self.clear_chat()
+
+    # ---------- Internal ----------
+    def _on_enter_key(self, event):
+        # Plain Enter: send. Shift+Enter already default behavior in Text
+        # In Tkinter, Shift+Enter does NOT automatically insert a newline
+        # in a plain Text widget; we detect the modifier here.
+        if event.state & 0x0001:  # Shift key
+            # Let default behavior (insert newline) happen
+            return None
+        self._on_send_clicked()
+        return "break"
+
+    def _update_send_state(self):
+        content = self.message_input.get("1.0", "end").strip()
+        has_target = self._current_target is not None
+        self.send_button.configure(
+            state="normal" if (content and has_target) else "disabled"
+        )
+
+    def _on_send_clicked(self):
+        content = self.message_input.get("1.0", "end").strip()
+        if not content or not self._current_target:
+            return
+
+        # Show locally as own message
+        self.add_message(self._username or "我", content)
+        self.message_sent.emit(self._current_target, content)
+        self.message_input.delete("1.0", "end")
+
+    def _on_file_button_clicked(self):
+        if not self._current_target:
+            try:
+                messagebox.showwarning("提示", "请先选择一个聊天对象")
+            except Exception:
+                pass
+            return
+
+        file_path = filedialog.askopenfilename(
+            title="选择要发送的文件"
+        )
+        if file_path:
+            self.send_file_request.emit(self._current_target)
+
+    def _run_on_ui_thread(self, fn):
+        """Schedule `fn` to run on the Tk main thread (safe from worker threads)."""
+        root = self._get_root()
+        if root is not None:
+            try:
+                root.after(0, fn)
+            except Exception:
+                fn()
+        else:
+            fn()
+
+    def _get_root(self) -> Optional[tk.Misc]:
+        try:
+            return self.winfo_toplevel()
+        except Exception:
+            return None
+
+
+class ChatTabWidget(ttk.Frame):
+    """Tab-based chat widget. Each conversation in its own tab.
+
+    Signals:
+        message_sent (str, str)    — (target, content)
+
+    Methods:
+        set_username(username)
+        open_chat(target, is_group=False)
+        add_message_to_chat(target, username, content, timestamp=None)
+        close_all_chats()
+    """
+
+    def __init__(self, master=None, **kwargs):
+        super().__init__(master, **kwargs)
+        self._chats: Dict[str, ChatWidget] = {}
+        self._username: Optional[str] = None
+
+        # Signals
+        self.message_sent = Signal(str, str)
 
         self._init_ui()
 
     def _init_ui(self):
-        """Initialize the user interface."""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill="both", expand=True)
 
-        # Chat header
-        self.header_widget = QWidget()
-        self.header_widget.setStyleSheet("background-color: #FAFAFA; border-bottom: 1px solid #E0E0E0;")
-        header_layout = QHBoxLayout(self.header_widget)
-        header_layout.setContentsMargins(10, 5, 10, 5)
+        # Bind tab close via middle-click on the tab (optional convenience)
+        self.notebook.bind("<Button-2>", self._on_tab_middle_click)
 
-        self.title_label = QLabel("聊天")
-        self.title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
-        header_layout.addWidget(self.title_label)
+    def _on_tab_middle_click(self, event):
+        try:
+            tab_id = self.notebook.index(f"@{event.x},{event.y}")
+            if tab_id >= 0:
+                target = self._target_for_tab_index(tab_id)
+                if target:
+                    self._close_chat(target)
+        except Exception:
+            pass
 
-        header_layout.addStretch()
+    def _target_for_tab_index(self, index: int) -> Optional[str]:
+        try:
+            widget = self.notebook.nametowidget(self.notebook.tabs()[index])
+        except Exception:
+            return None
+        for target, chat in self._chats.items():
+            if chat is widget:
+                return target
+        return None
 
-        self.member_count_label = QLabel("")
-        self.member_count_label.setStyleSheet("color: #757575; font-size: 12px;")
-        header_layout.addWidget(self.member_count_label)
-
-        layout.addWidget(self.header_widget)
-
-        # Chat history
-        self.chat_history = ChatHistory()
-        layout.addWidget(self.chat_history)
-
-        # Input area
-        input_widget = QWidget()
-        input_widget.setStyleSheet("background-color: #FAFAFA; border-top: 1px solid #E0E0E0;")
-        input_layout = QVBoxLayout(input_widget)
-        input_layout.setContentsMargins(10, 5, 10, 5)
-        input_layout.setSpacing(5)
-
-        # File transfer button row
-        file_button_layout = QHBoxLayout()
-        file_button_layout.addStretch()
-
-        self.file_button = QToolButton()
-        self.file_button.setText("📎 发送文件")
-        self.file_button.clicked.connect(self._on_file_button_clicked)
-        file_button_layout.addWidget(self.file_button)
-
-        input_layout.addLayout(file_button_layout)
-
-        # Message input row
-        message_layout = QHBoxLayout()
-        message_layout.setSpacing(5)
-
-        self.message_input = QTextEdit()
-        self.message_input.setPlaceholderText("输入消息...")
-        self.message_input.setMaximumHeight(100)
-        self.message_input.setTabChangesFocus(True)
-        self.message_input.installEventFilter(self)
-        message_layout.addWidget(self.message_input)
-
-        self.send_button = QPushButton("发送")
-        self.send_button.setEnabled(False)
-        self.send_button.clicked.connect(self._on_send_clicked)
-        self.send_button.setMinimumWidth(80)
-        self.send_button.setMinimumHeight(34)
-        self.send_button.setStyleSheet(
-            "QPushButton { background: #2E7D32; color: white; border: none; border-radius: 6px; padding: 8px 18px; font-weight: 600; font-size: 12px; }"
-            "QPushButton:hover { background: #388E3C; }"
-            "QPushButton:disabled { background: #BDBDBD; color: #EEEEEE; }"
-        )
-        message_layout.addWidget(self.send_button)
-
-        input_layout.addLayout(message_layout)
-
-        layout.addWidget(input_widget)
-
-        # Connect message input changes
-        self.message_input.textChanged.connect(self._on_input_changed)
-
-    def eventFilter(self, obj, event):
-        """Handle event filter for Enter key sending."""
-        if obj == self.message_input and event.type() == event.KeyPress:
-            if event.key() == Qt.Key_Return and not event.modifiers() & Qt.ShiftModifier:
-                self._on_send_clicked()
-                return True
-        return super().eventFilter(obj, event)
-
+    # ---------- Public API ----------
     def set_username(self, username: str):
-        """Set the current username."""
-        self._username = username
-
-    def set_chat_target(self, target: str, is_group: bool = False):
-        """Set the current chat target (user or group)."""
-        self._current_target = target
-        self._is_group_chat = is_group
-        self.title_label.setText(f"与 {target} 的聊天" if not is_group else f"群聊: {target}")
-        self.file_button.setEnabled(True)
-
-    def clear_chat(self):
-        """Clear the chat history."""
-        self.chat_history.clear_messages()
-
-    def add_message(self, username: str, content: str, timestamp: datetime = None, message_type: str = "text"):
-        """Add a message to the chat."""
-        if timestamp is None:
-            timestamp = datetime.now()
-
-        is_own = (username == self._username)
-        message = ChatMessage(username, content, timestamp, is_own, message_type)
-        self.chat_history.add_message(message)
-
-        # Store in history
-        if self._current_target:
-            if self._current_target not in self._message_history:
-                self._message_history[self._current_target] = []
-            self._message_history[self._current_target].append((username, content, timestamp))
-
-    def add_system_message(self, content: str):
-        """Add a system message to the chat."""
-        message = ChatMessage("系统", content, datetime.now(), False, "system")
-        message.setStyleSheet("""
-            ChatMessage {
-                background-color: #FFF8E1;
-                border-radius: 10px;
-                border: 1px solid #FFE082;
-            }
-        """)
-        self.chat_history.add_message(message)
-
-    def _on_input_changed(self):
-        """Handle input text changes."""
-        text = self.message_input.toPlainText().strip()
-        self.send_button.setEnabled(bool(text) and self._current_target is not None)
-
-    def _on_send_clicked(self):
-        """Handle send button click."""
-        content = self.message_input.toPlainText().strip()
-        if not content or not self._current_target:
-            return
-
-        message_type = "text"
-        # 在本地显示自己发送的消息
-        self.add_message(self._username or "我", content)
-        self.send_message.emit(self._current_target, content, message_type)
-        self.message_input.clear()
-        self.message_sent.emit()
-
-    def _on_file_button_clicked(self):
-        """Handle file button click."""
-        if not self._current_target:
-            QMessageBox.warning(self, "错误", "请先选择一个聊天对象")
-            return
-
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "选择要发送的文件",
-            "",
-            "所有文件 (*.*)"
-        )
-
-        if file_path:
-            self.send_file_request.emit(self._current_target)
-
-    def get_message_history(self, target: str) -> List[Tuple[str, str, datetime]]:
-        """Get message history for a target."""
-        return self._message_history.get(target, [])
-
-    def load_message_history(self, messages: List[Dict]):
-        """Load message history from server response."""
-        self.chat_history.clear_messages()
-        for msg in messages:
-            username = msg.get("sender", msg.get("username", "未知"))
-            content = msg.get("content", msg.get("message", ""))
-            timestamp_str = msg.get("timestamp")
-            if timestamp_str:
-                try:
-                    timestamp = datetime.fromtimestamp(float(timestamp_str))
-                except (ValueError, TypeError):
-                    timestamp = datetime.now()
-            else:
-                timestamp = datetime.now()
-            self.add_message(username, content, timestamp)
-
-
-class ChatTabWidget(QTabWidget):
-    """
-    Tab widget for managing multiple chat conversations.
-    Signals:
-        chat_started: Emitted with (target, is_group) when a new chat is started
-        message_sent: Emitted with (target, content) when a message is sent
-    """
-
-    chat_started = pyqtSignal(str, bool)
-    message_sent = pyqtSignal(str, str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._chats: Dict[str, ChatWidget] = {}
-        self._username: Optional[str] = None
-
-        self.setTabsClosable(True)
-        self.tabCloseRequested.connect(self._on_tab_close_requested)
-
-    def set_username(self, username: str):
-        """Set the current username."""
         self._username = username
         for chat in self._chats.values():
             chat.set_username(username)
 
     def open_chat(self, target: str, is_group: bool = False):
-        """Open or switch to a chat with the target."""
         if target in self._chats:
-            self.setCurrentWidget(self._chats[target])
+            self.notebook.select(self._chats[target])
         else:
             self._create_chat_tab(target, is_group)
-        self.chat_started.emit(target, is_group)
 
     def _create_chat_tab(self, target: str, is_group: bool = False):
-        """Create a new chat tab."""
-        chat_widget = ChatWidget()
-        chat_widget.set_username(self._username or "")
-        chat_widget.set_chat_target(target, is_group)
-        chat_widget.send_message.connect(self._on_send_message)
-        chat_widget.message_sent.connect(lambda: self.message_sent.emit(target, ""))
+        chat = ChatWidget(self.notebook)
+        chat.set_username(self._username or "")
+        chat.set_chat_target(target, is_group)
 
+        # Forward message_sent to notebook-level signal
+        chat.message_sent.connect(
+            lambda tgt, content: self.message_sent.emit(tgt, content)
+        )
+
+        # Trim label to a reasonable width
         tab_text = target if len(target) <= 15 else target[:12] + "..."
-        index = self.addTab(chat_widget, tab_text)
-        self.setCurrentIndex(index)
+        self.notebook.add(chat, text=tab_text)
+        self.notebook.select(chat)
 
-        self._chats[target] = chat_widget
+        self._chats[target] = chat
 
-    def _on_send_message(self, target: str, content: str, message_type: str):
-        """Handle message send from chat widget."""
-        self.message_sent.emit(target, content)
-
-    def _on_tab_close_requested(self, index: int):
-        """Handle tab close request."""
-        widget = self.widget(index)
-        if widget:
-            target = None
-            for t, w in self._chats.items():
-                if w == widget:
-                    target = t
-                    break
-            if target:
-                del self._chats[target]
-            widget.deleteLater()
-        self.removeTab(index)
-
-    def get_chat(self, target: str) -> Optional[ChatWidget]:
-        """Get the chat widget for a target."""
-        return self._chats.get(target)
-
-    def get_active_chat(self) -> Optional[str]:
-        """Get the target of the currently active chat."""
-        widget = self.currentWidget()
-        if widget:
-            for target, chat in self._chats.items():
-                if chat == widget:
-                    return target
-        return None
-
-    def add_message_to_chat(self, target: str, username: str, content: str, timestamp: datetime = None):
-        """Add a message to a specific chat."""
-        if target in self._chats:
-            self._chats[target].add_message(username, content, timestamp)
-        else:
-            # Create chat tab if it doesn't exist
-            is_group = False
-            self._create_chat_tab(target, is_group)
-            self._chats[target].add_message(username, content, timestamp)
+    def add_message_to_chat(self, target: str, username: str, content: str,
+                            timestamp: datetime = None):
+        if target not in self._chats:
+            self._create_chat_tab(target, False)
+        self._chats[target].add_message(username, content, timestamp)
 
     def close_all_chats(self):
-        """Close all chat tabs."""
-        for chat in self._chats.values():
-            chat.deleteLater()
+        for chat in list(self._chats.values()):
+            try:
+                self.notebook.forget(chat)
+            except Exception:
+                pass
+            try:
+                chat.close()
+            except Exception:
+                pass
         self._chats.clear()
-        while self.count():
-            self.removeTab(0)
+
+    def _close_chat(self, target: str):
+        if target in self._chats:
+            chat = self._chats.pop(target)
+            try:
+                self.notebook.forget(chat)
+            except Exception:
+                pass
+            try:
+                chat.close()
+            except Exception:
+                pass

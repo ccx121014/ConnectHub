@@ -1,527 +1,394 @@
 """
-File Transfer Module for Online Collaboration Suite
-Provides peer-to-peer file transfer using WebRTC DataChannel.
+File Transfer Module for ConnectHub
+纯 Python 实现：管理文件传输会话（发送/接收），使用 threading 与信号系统。
+无 PyQt5，无 tkinter，无 UI 代码。
 """
 
-import asyncio
+import base64
 import logging
 import os
+import sys
+import threading
 import uuid
-import hashlib
-import time
-from dataclasses import dataclass, field
-from enum import Enum
-from typing import Optional, Callable, Dict, Any, List
 from pathlib import Path
+from typing import Dict, Optional
 
-
-# Add project root and client dir to path for module imports (cross-platform)
-from pathlib import Path
 _project_root = Path(__file__).parent.parent.resolve()
-import sys as _sys
-_sys.path.insert(0, str(_project_root))
-_sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(_project_root))
+sys.path.insert(0, str(Path(__file__).parent))
 
-from PyQt5.QtCore import QObject, pyqtSignal
-
-from protocol.messages import Message, MessageType, create_message
+from protocol.signals import Signal, SignalBridge
 
 logger = logging.getLogger(__name__)
 
-CHUNK_SIZE = 64 * 1024  # 64KB chunks
+CHUNK_SIZE = 32 * 1024  # 32KB
 
 
-class TransferState(Enum):
-    """File transfer state"""
-    PENDING = "pending"
-    REQUESTED = "requested"
-    ACCEPTED = "accepted"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
-    REJECTED = "rejected"
-    FAILED = "failed"
+class FileTransferSession:
+    """单个文件传输会话的状态管理。"""
+
+    def __init__(
+        self,
+        file_id: str,
+        target: str,
+        direction: str,
+        file_path: str = "",
+        file_name: str = "",
+        file_size: int = 0,
+        sender: str = "",
+        receiver: str = "",
+    ):
+        self.file_id = file_id
+        self.target = target
+        self.direction = direction  # "send" | "receive"
+        self.file_path = file_path
+        self.file_name = file_name or (os.path.basename(file_path) if file_path else "")
+        self.file_size = file_size
+        self.total_chunks = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE if file_size > 0 else 0
+        self.received_chunks: Dict[int, bytes] = {}
+        self.sent_chunks: int = 0
+        self.status: str = "pending"  # pending | accepted | rejected | in_progress | complete | error
+        self.sender = sender
+        self.receiver = receiver
+        self.error_message: str = ""
 
 
-@dataclass
-class TransferInfo:
-    """Information about a file transfer"""
-    file_id: str
-    file_name: str
-    file_size: int
-    file_path: str
-    target_user: str
-    direction: str  # "send" or "receive"
-    state: TransferState = TransferState.PENDING
-    chunk_count: int = 0
-    chunk_size: int = CHUNK_SIZE
-    current_chunk: int = 0
-    progress: float = 0.0
-    error: Optional[str] = None
-    created_at: float = field(default_factory=time.time)
-    completed_at: Optional[float] = None
-    checksum: Optional[str] = None
+class FileTransferManager(SignalBridge):
+    """文件传输管理器。
 
-
-class FileTransferManager(QObject):
-    """
-    Manages file transfers using WebRTC DataChannel.
-    
-    Signals:
-        transfer_started: Emitted when a transfer begins (file_id)
-        transfer_progress: Emitted with (file_id, progress, chunk_index, chunk_count)
-        transfer_completed: Emitted when transfer completes (file_id)
-        transfer_cancelled: Emitted when transfer is cancelled (file_id)
-        transfer_rejected: Emitted when transfer is rejected (file_id)
-        transfer_error: Emitted on error (file_id, error_message)
-        incoming_request: Emitted when receiving a file request (file_id, file_name, file_size, sender)
+    对外信号：
+      transfer_requested(file_id, sender, file_name, file_size)
+      transfer_progress(file_id, sent_bytes, total_bytes)
+      transfer_completed(file_id, final_path)
+      transfer_error(file_id, error_msg)
+      transfer_accepted(file_id)
+      transfer_rejected(file_id)
     """
 
-    transfer_started = pyqtSignal(str)
-    transfer_progress = pyqtSignal(str, float, int, int)
-    transfer_completed = pyqtSignal(str)
-    transfer_cancelled = pyqtSignal(str)
-    transfer_rejected = pyqtSignal(str)
-    transfer_error = pyqtSignal(str, str)
-    incoming_request = pyqtSignal(str, str, int, str)  # file_id, file_name, file_size, sender
+    def __init__(self, websocket_client=None, username: Optional[str] = None):
+        super().__init__()
+        self._ws_client = websocket_client
+        self._username: Optional[str] = username
+        self._sessions: Dict[str, FileTransferSession] = {}
+        self._lock = threading.RLock()
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._transfers: Dict[str, TransferInfo] = {}
-        self._data_channels: Dict[str, Any] = {}  # file_id -> DataChannel
-        self._file_buffers: Dict[str, bytes] = {}  # file_id -> received data buffer
-        self._peers: Dict[str, Any] = {}  # user_id -> WebRTCPeer
-        self._webrtc_handler: Optional[Callable] = None
-        self._username: Optional[str] = None
-        self._download_dir: str = os.path.expanduser("~/Downloads")
+        # 覆盖 SignalBridge 中默认信号：这里使用扩展信号集合
+        self.transfer_requested = Signal(str, str, str, int)
+        self.transfer_progress = Signal(str, int, int)
+        self.transfer_completed = Signal(str, str)
+        self.transfer_error = Signal(str, str)
+        self.transfer_accepted = Signal(str)
+        self.transfer_rejected = Signal(str)
+
+    # -------- 基础配置 --------
+    def set_websocket_client(self, ws_client):
+        self._ws_client = ws_client
 
     def set_username(self, username: str):
-        """Set the current username."""
         self._username = username
 
-    def set_webrtc_handler(self, handler: Callable):
-        """Set the WebRTC handler for creating peer connections."""
-        self._webrtc_handler = handler
+    # -------- Session 管理 --------
+    def get_all_sessions(self) -> Dict[str, FileTransferSession]:
+        with self._lock:
+            return dict(self._sessions)
 
-    def set_download_dir(self, directory: str):
-        """Set the download directory for incoming files."""
-        self._download_dir = directory
-        os.makedirs(self._download_dir, exist_ok=True)
+    def get_session(self, file_id: str) -> Optional[FileTransferSession]:
+        with self._lock:
+            return self._sessions.get(file_id)
 
-    def _generate_file_id(self) -> str:
-        """Generate a unique file ID."""
-        return str(uuid.uuid4())
+    def _add_session(self, session: FileTransferSession):
+        with self._lock:
+            self._sessions[session.file_id] = session
 
-    def _calculate_checksum(self, data: bytes) -> str:
-        """Calculate SHA256 checksum of data."""
-        return hashlib.sha256(data).hexdigest()
+    def _remove_session(self, file_id: str):
+        with self._lock:
+            self._sessions.pop(file_id, None)
 
-    def _get_transfer(self, file_id: str) -> Optional[TransferInfo]:
-        """Get transfer info by file ID."""
-        return self._transfers.get(file_id)
-
-    def send_file(self, file_path: str, target_user: str) -> str:
-        """
-        Initiate a file transfer to a target user.
-        
-        Args:
-            file_path: Path to the file to send
-            target_user: Username of the recipient
-            
-        Returns:
-            file_id: Unique identifier for the transfer
-        """
+    # -------- 发送方 --------
+    def start_transfer(self, target: str, file_path: str) -> str:
+        """发起一个文件发送请求。返回 file_id。"""
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
-        if not self._username:
-            raise RuntimeError("Username not set")
-
-        file_id = self._generate_file_id()
+        file_id = str(uuid.uuid4())
         file_size = os.path.getsize(file_path)
         file_name = os.path.basename(file_path)
-        chunk_count = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
+        total_chunks = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
 
-        transfer = TransferInfo(
+        session = FileTransferSession(
             file_id=file_id,
+            target=target,
+            direction="send",
+            file_path=file_path,
             file_name=file_name,
             file_size=file_size,
-            file_path=file_path,
-            target_user=target_user,
-            direction="send",
-            state=TransferState.REQUESTED,
-            chunk_count=chunk_count,
-            chunk_size=CHUNK_SIZE
+            sender=self._username or "",
+            receiver=target,
         )
+        session.status = "pending"
+        self._add_session(session)
 
-        self._transfers[file_id] = transfer
-        self._initiate_webrtc_connection(file_id, target_user)
+        logger.info(f"[FileTransfer] start_transfer: {file_id} {file_name} ({file_size}B) -> {target}")
 
-        logger.info(f"File transfer initiated: {file_id} ({file_name} -> {target_user})")
+        if self._ws_client and hasattr(self._ws_client, "send_file_transfer_request"):
+            self._ws_client.send_file_transfer_request(
+                target,
+                file_name,
+                file_size,
+                file_id,
+                total_chunks,
+                CHUNK_SIZE,
+            )
+        else:
+            logger.warning("WebSocket client 未设置，无法发送请求消息")
+
         return file_id
 
-    def _initiate_webrtc_connection(self, file_id: str, target_user: str):
-        """Initiate WebRTC connection for file transfer."""
-        transfer = self._get_transfer(file_id)
-        if not transfer:
+    def _send_chunks_thread(self, file_id: str):
+        """后台线程读取文件并分块发送。"""
+        session = self.get_session(file_id)
+        if session is None:
             return
-
-        if self._webrtc_handler:
-            peer = self._webrtc_handler(target_user, "file_transfer", file_id)
-            self._peers[target_user] = peer
-        else:
-            logger.warning("No WebRTC handler set, using direct DataChannel")
-
-    def accept_file(self, file_id: str) -> bool:
-        """
-        Accept an incoming file transfer.
-        
-        Args:
-            file_id: Unique identifier for the transfer
-            
-        Returns:
-            True if acceptance was successful
-        """
-        transfer = self._get_transfer(file_id)
-        if not transfer:
-            logger.error(f"Transfer not found: {file_id}")
-            return False
-
-        if transfer.state != TransferState.REQUESTED:
-            logger.error(f"Transfer not in REQUESTED state: {file_id}")
-            return False
-
-        transfer.state = TransferState.ACCEPTED
-        logger.info(f"File transfer accepted: {file_id}")
-        return True
-
-    def reject_file(self, file_id: str) -> bool:
-        """
-        Reject an incoming file transfer.
-        
-        Args:
-            file_id: Unique identifier for the transfer
-            
-        Returns:
-            True if rejection was successful
-        """
-        transfer = self._get_transfer(file_id)
-        if not transfer:
-            logger.error(f"Transfer not found: {file_id}")
-            return False
-
-        if transfer.state != TransferState.REQUESTED:
-            logger.error(f"Transfer not in REQUESTED state: {file_id}")
-            return False
-
-        transfer.state = TransferState.REJECTED
-        self.transfer_rejected.emit(file_id)
-        self._cleanup_transfer(file_id)
-        logger.info(f"File transfer rejected: {file_id}")
-        return True
-
-    def cancel_transfer(self, file_id: str) -> bool:
-        """
-        Cancel an ongoing or pending transfer.
-        
-        Args:
-            file_id: Unique identifier for the transfer
-            
-        Returns:
-            True if cancellation was successful
-        """
-        transfer = self._get_transfer(file_id)
-        if not transfer:
-            logger.error(f"Transfer not found: {file_id}")
-            return False
-
-        if transfer.state in [TransferState.COMPLETED, TransferState.CANCELLED, TransferState.REJECTED]:
-            return False
-
-        transfer.state = TransferState.CANCELLED
-        self._cleanup_transfer(file_id)
-        self.transfer_cancelled.emit(file_id)
-        logger.info(f"File transfer cancelled: {file_id}")
-        return True
-
-    def get_progress(self, file_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Get the progress of a file transfer.
-        
-        Args:
-            file_id: Unique identifier for the transfer
-            
-        Returns:
-            Dictionary with progress information or None if not found
-        """
-        transfer = self._get_transfer(file_id)
-        if not transfer:
-            return None
-
-        return {
-            "file_id": file_id,
-            "file_name": transfer.file_name,
-            "file_size": transfer.file_size,
-            "state": transfer.state.value,
-            "progress": transfer.progress,
-            "current_chunk": transfer.current_chunk,
-            "chunk_count": transfer.chunk_count,
-            "direction": transfer.direction,
-            "target_user": transfer.target_user
-        }
-
-    def get_all_transfers(self) -> List[Dict[str, Any]]:
-        """Get all file transfers."""
-        return [self.get_progress(file_id) for file_id in self._transfers.keys()]
-
-    def get_active_transfers(self) -> List[Dict[str, Any]]:
-        """Get all active (in-progress) transfers."""
-        active_states = [TransferState.REQUESTED, TransferState.ACCEPTED, TransferState.IN_PROGRESS]
-        return [
-            self.get_progress(file_id)
-            for file_id, transfer in self._transfers.items()
-            if transfer.state in active_states
-        ]
-
-    def handle_incoming_request(
-        self,
-        file_id: str,
-        file_name: str,
-        file_size: int,
-        chunk_count: int,
-        sender: str
-    ):
-        """Handle an incoming file transfer request."""
-        if file_id in self._transfers:
-            logger.warning(f"Duplicate file transfer request: {file_id}")
-            return
-
-        transfer = TransferInfo(
-            file_id=file_id,
-            file_name=file_name,
-            file_size=file_size,
-            file_path="",
-            target_user=sender,
-            direction="receive",
-            state=TransferState.REQUESTED,
-            chunk_count=chunk_count,
-            chunk_size=CHUNK_SIZE
-        )
-
-        self._transfers[file_id] = transfer
-        self.incoming_request.emit(file_id, file_name, file_size, sender)
-        logger.info(f"Incoming file transfer request: {file_id} ({file_name} from {sender})")
-
-    def handle_file_response(self, file_id: str, accepted: bool):
-        """Handle response to a file transfer request."""
-        transfer = self._get_transfer(file_id)
-        if not transfer:
-            logger.error(f"Transfer not found: {file_id}")
-            return
-
-        if accepted:
-            transfer.state = TransferState.ACCEPTED
-            self._start_sending(file_id)
-        else:
-            transfer.state = TransferState.REJECTED
-            self.transfer_rejected.emit(file_id)
-            self._cleanup_transfer(file_id)
-            logger.info(f"File transfer rejected by recipient: {file_id}")
-
-    def _start_sending(self, file_id: str):
-        """Start sending file data."""
-        transfer = self._get_transfer(file_id)
-        if not transfer:
-            return
-
-        if transfer.direction != "send":
-            logger.error("Cannot start sending: wrong direction")
-            return
-
-        transfer.state = TransferState.IN_PROGRESS
-        self.transfer_started.emit(file_id)
-        
-        asyncio.create_task(self._send_chunks(file_id))
-
-    async def _send_chunks(self, file_id: str):
-        """Send file chunks via DataChannel."""
-        transfer = self._get_transfer(file_id)
-        if not transfer:
+        if session.direction != "send":
             return
 
         try:
-            with open(transfer.file_path, "rb") as f:
+            session.status = "in_progress"
+            total_chunks = session.total_chunks
+            file_size = session.file_size
+            target = session.target
+
+            with open(session.file_path, "rb") as f:
                 chunk_index = 0
                 while True:
-                    if transfer.state == TransferState.CANCELLED:
-                        logger.info(f"Transfer cancelled, stopping: {file_id}")
+                    # 允许中途取消
+                    current = self.get_session(file_id)
+                    if current is None or current.status in ("rejected", "error"):
+                        logger.info(f"[FileTransfer] 会话终止，停止发送: {file_id}")
                         return
 
-                    chunk = f.read(transfer.chunk_size)
+                    chunk = f.read(CHUNK_SIZE)
                     if not chunk:
                         break
 
-                    checksum = self._calculate_checksum(chunk)
+                    encoded = base64.b64encode(chunk).decode("ascii")
+                    if self._ws_client and hasattr(self._ws_client, "send_file_transfer_data"):
+                        self._ws_client.send_file_transfer_data(
+                            target, file_id, chunk_index, encoded
+                        )
 
-                    chunk_data = {
-                        "file_id": file_id,
-                        "chunk_index": chunk_index,
-                        "data": chunk.hex(),
-                        "checksum": checksum,
-                        "is_last": len(chunk) < transfer.chunk_size
-                    }
-
-                    await self._send_chunk_via_datachannel(file_id, chunk_data)
-
-                    transfer.current_chunk = chunk_index + 1
-                    transfer.progress = (transfer.current_chunk / transfer.chunk_count) * 100
-
-                    self.transfer_progress.emit(
-                        file_id,
-                        transfer.progress,
-                        transfer.current_chunk,
-                        transfer.chunk_count
-                    )
-
+                    session.sent_chunks = chunk_index + 1
+                    sent_bytes = min(file_size, (chunk_index + 1) * CHUNK_SIZE)
+                    self.transfer_progress.emit(file_id, sent_bytes, file_size)
                     chunk_index += 1
 
-                transfer.state = TransferState.COMPLETED
-                transfer.completed_at = time.time()
-                self.transfer_completed.emit(file_id)
-                logger.info(f"File transfer completed: {file_id}")
+            # 发送完成消息
+            if self._ws_client and hasattr(self._ws_client, "send_file_transfer_complete"):
+                self._ws_client.send_file_transfer_complete(target, file_id, total_chunks)
 
-        except Exception as e:
-            logger.error(f"Error sending file {file_id}: {e}")
-            transfer.state = TransferState.FAILED
-            transfer.error = str(e)
-            self.transfer_error.emit(file_id, str(e))
+            session.status = "complete"
+            self.transfer_completed.emit(file_id, session.file_path)
+            logger.info(f"[FileTransfer] 发送完成: {file_id}")
+        except Exception as exc:
+            logger.exception(f"[FileTransfer] 发送失败 {file_id}: {exc}")
+            session.status = "error"
+            session.error_message = str(exc)
+            self.transfer_error.emit(file_id, str(exc))
 
-        finally:
-            self._cleanup_transfer(file_id)
+    # -------- 接收方 --------
+    def handle_incoming_request(self, msg_obj):
+        """处理接收到的文件传输请求消息。"""
+        payload = getattr(msg_obj, "payload", None) or {}
+        # 兼容：某些调用者也可能把字段放在 Message 的上层
+        file_id = payload.get("file_id") or getattr(msg_obj, "file_id", None)
+        file_name = payload.get("file_name") or getattr(msg_obj, "file_name", "")
+        file_size = payload.get("file_size", 0) or getattr(msg_obj, "file_size", 0)
+        sender = payload.get("sender") or getattr(msg_obj, "sender", "") or (
+            msg_obj.sender if hasattr(msg_obj, "sender") else ""
+        )
 
-    async def _send_chunk_via_datachannel(self, file_id: str, chunk_data: Dict):
-        """Send a chunk via DataChannel."""
-        dc = self._data_channels.get(file_id)
-        if dc and dc.readyState == "open":
-            try:
-                message = {
-                    "type": "file_chunk",
-                    **chunk_data
-                }
-                dc.send(json.dumps(message))
-            except Exception as e:
-                logger.error(f"Error sending chunk via DataChannel: {e}")
-
-    def handle_chunk_received(self, file_id: str, chunk_index: int, data: str, checksum: str, is_last: bool):
-        """Handle a received file chunk."""
-        import json
-        
-        transfer = self._get_transfer(file_id)
-        if not transfer:
-            logger.error(f"Transfer not found: {file_id}")
+        if not file_id:
+            logger.warning("收到无 file_id 的文件请求，忽略")
             return
 
-        try:
-            chunk_bytes = bytes.fromhex(data)
-            
-            expected_checksum = self._calculate_checksum(chunk_bytes)
-            if checksum != expected_checksum:
-                logger.error(f"Checksum mismatch for chunk {chunk_index} of {file_id}")
-                self.transfer_error.emit(file_id, "Checksum mismatch")
-                self.cancel_transfer(file_id)
+        with self._lock:
+            if file_id in self._sessions:
+                logger.warning(f"重复的文件请求: {file_id}")
                 return
 
-            if file_id not in self._file_buffers:
-                self._file_buffers[file_id] = b''
+        session = FileTransferSession(
+            file_id=file_id,
+            target=sender,
+            direction="receive",
+            file_path="",
+            file_name=file_name,
+            file_size=file_size,
+            sender=sender,
+            receiver=self._username or "",
+        )
+        session.status = "pending"
+        self._add_session(session)
 
-            self._file_buffers[file_id] += chunk_bytes
+        logger.info(f"[FileTransfer] 收到请求: {file_id} {file_name} ({file_size}B) from {sender}")
+        self.transfer_requested.emit(file_id, sender, file_name, file_size)
 
-            transfer.current_chunk = chunk_index + 1
-            transfer.progress = (transfer.current_chunk / transfer.chunk_count) * 100
+    def accept_transfer(self, file_id: str, save_path: str):
+        """接受一个传入的文件传输，并开始准备接收数据。"""
+        session = self.get_session(file_id)
+        if session is None:
+            logger.error(f"未找到会话: {file_id}")
+            self.transfer_error.emit(file_id, "会话不存在")
+            return
 
-            self.transfer_progress.emit(
-                file_id,
-                transfer.progress,
-                transfer.current_chunk,
-                transfer.chunk_count
-            )
+        if session.direction != "receive":
+            logger.error(f"accept_transfer 只能用于接收方向: {file_id}")
+            return
 
-            if is_last:
-                self._complete_reception(file_id)
+        session.file_path = save_path
+        session.status = "accepted"
 
-        except Exception as e:
-            logger.error(f"Error handling chunk {chunk_index} of {file_id}: {e}")
-            transfer.state = TransferState.FAILED
-            transfer.error = str(e)
-            self.transfer_error.emit(file_id, str(e))
+        # 通知对方已接受
+        if self._ws_client and hasattr(self._ws_client, "send_file_transfer_response"):
+            self._ws_client.send_file_transfer_response(session.target, file_id, True)
 
-    def _complete_reception(self, file_id: str):
-        """Complete file reception and save the file."""
-        transfer = self._get_transfer(file_id)
-        if not transfer:
+        logger.info(f"[FileTransfer] 接受文件: {file_id} -> {save_path}")
+        self.transfer_accepted.emit(file_id)
+
+    def reject_transfer(self, file_id: str):
+        session = self.get_session(file_id)
+        if session is None:
+            logger.error(f"未找到会话: {file_id}")
+            return
+
+        session.status = "rejected"
+        if session.direction == "receive" and self._ws_client and hasattr(
+            self._ws_client, "send_file_transfer_response"
+        ):
+            self._ws_client.send_file_transfer_response(session.target, file_id, False)
+
+        logger.info(f"[FileTransfer] 拒绝文件: {file_id}")
+        self.transfer_rejected.emit(file_id)
+        self._remove_session(file_id)
+
+    def cancel_transfer(self, file_id: str):
+        session = self.get_session(file_id)
+        if session is None:
+            return
+        session.status = "error"
+        session.error_message = "cancelled"
+        self.transfer_error.emit(file_id, "cancelled")
+        self._remove_session(file_id)
+        logger.info(f"[FileTransfer] 取消传输: {file_id}")
+
+    def handle_incoming_data(self, msg_obj):
+        """处理接收到的文件数据消息（base64 编码的 chunk）。"""
+        payload = getattr(msg_obj, "payload", None) or {}
+        file_id = payload.get("file_id") or getattr(msg_obj, "file_id", None)
+        chunk_index = payload.get("chunk_index") if payload is not None else None
+        if chunk_index is None:
+            chunk_index = getattr(msg_obj, "chunk_index", None)
+        data_b64 = payload.get("data") if payload is not None else None
+        if data_b64 is None:
+            data_b64 = getattr(msg_obj, "data", "")
+
+        if file_id is None:
+            return
+
+        session = self.get_session(file_id)
+        if session is None:
+            logger.warning(f"收到未知会话的数据 chunk: {file_id}")
+            return
+        if session.status == "rejected":
             return
 
         try:
-            file_data = self._file_buffers.get(file_id, b'')
-            
-            os.makedirs(self._download_dir, exist_ok=True)
-            output_path = os.path.join(self._download_dir, transfer.file_name)
-            
-            with open(output_path, "wb") as f:
-                f.write(file_data)
-            
-            transfer.file_path = output_path
-            transfer.state = TransferState.COMPLETED
-            transfer.completed_at = time.time()
-            
-            self.transfer_completed.emit(file_id)
-            logger.info(f"File received and saved: {output_path}")
+            chunk_bytes = base64.b64decode(data_b64)
+        except Exception as exc:
+            logger.error(f"base64 解码失败: {file_id} chunk {chunk_index}: {exc}")
+            self.transfer_error.emit(file_id, f"base64 解码失败: {exc}")
+            return
 
-        except Exception as e:
-            logger.error(f"Error completing reception of {file_id}: {e}")
-            transfer.state = TransferState.FAILED
-            transfer.error = str(e)
-            self.transfer_error.emit(file_id, str(e))
+        session.received_chunks[int(chunk_index)] = chunk_bytes
+        received_count = len(session.received_chunks)
+        received_bytes = sum(len(b) for b in session.received_chunks.values())
 
-        finally:
-            self._cleanup_transfer(file_id)
+        session.status = "in_progress"
+        self.transfer_progress.emit(file_id, received_bytes, session.file_size)
 
-    def register_data_channel(self, file_id: str, data_channel: Any):
-        """Register a DataChannel for a file transfer."""
-        self._data_channels[file_id] = data_channel
-        logger.info(f"DataChannel registered for transfer: {file_id}")
+        # 如果所有 chunk 都到齐，提前完成写盘
+        if session.total_chunks > 0 and received_count >= session.total_chunks:
+            self._finalize_received(file_id)
 
-    def unregister_data_channel(self, file_id: str):
-        """Unregister a DataChannel."""
-        if file_id in self._data_channels:
-            del self._data_channels[file_id]
+    def handle_incoming_complete(self, msg_obj):
+        """处理接收到的文件传输完成消息。"""
+        payload = getattr(msg_obj, "payload", None) or {}
+        file_id = payload.get("file_id") or getattr(msg_obj, "file_id", None)
+        if file_id is None:
+            return
 
-    def _cleanup_transfer(self, file_id: str):
-        """Clean up resources for a transfer."""
-        if file_id in self._data_channels:
-            del self._data_channels[file_id]
-        if file_id in self._file_buffers:
-            del self._file_buffers[file_id]
-        if file_id in self._transfers:
-            transfer = self._transfers[file_id]
-            if transfer.state == TransferState.COMPLETED:
-                pass
-            elif transfer.state not in [TransferState.REJECTED, TransferState.CANCELLED]:
-                transfer.state = TransferState.FAILED
+        self._finalize_received(file_id)
 
-    def get_transfer_info(self, file_id: str) -> Optional[TransferInfo]:
-        """Get detailed transfer information."""
-        return self._get_transfer(file_id)
+    def _finalize_received(self, file_id: str):
+        session = self.get_session(file_id)
+        if session is None:
+            return
+        if session.direction != "receive":
+            return
 
-    def clear_completed_transfers(self):
-        """Clear all completed transfers from memory."""
-        completed_ids = [
-            file_id for file_id, transfer in self._transfers.items()
-            if transfer.state == TransferState.COMPLETED
-        ]
-        for file_id in completed_ids:
-            del self._transfers[file_id]
-        logger.info(f"Cleared {len(completed_ids)} completed transfers")
+        try:
+            save_path = session.file_path
+            if not save_path:
+                save_path = os.path.join(
+                    os.path.expanduser("~"), "Downloads", session.file_name or file_id
+                )
+
+            # 确保目录存在
+            save_dir = os.path.dirname(save_path)
+            if save_dir:
+                os.makedirs(save_dir, exist_ok=True)
+
+            # 按 chunk_index 顺序写入
+            with open(save_path, "wb") as f:
+                for idx in sorted(session.received_chunks.keys()):
+                    f.write(session.received_chunks[idx])
+
+            session.status = "complete"
+            session.file_path = save_path
+            self.transfer_completed.emit(file_id, save_path)
+            logger.info(f"[FileTransfer] 接收完成: {file_id} -> {save_path}")
+        except Exception as exc:
+            logger.exception(f"[FileTransfer] 写文件失败 {file_id}: {exc}")
+            session.status = "error"
+            session.error_message = str(exc)
+            self.transfer_error.emit(file_id, str(exc))
+
+    # -------- 作为发送方：处理响应消息（对方接受/拒绝） --------
+    def handle_response(self, msg_obj):
+        payload = getattr(msg_obj, "payload", None) or {}
+        file_id = payload.get("file_id") or getattr(msg_obj, "file_id", None)
+        accepted = payload.get("accepted") if payload is not None else None
+        if accepted is None:
+            accepted = getattr(msg_obj, "accepted", False)
+
+        if file_id is None:
+            return
+
+        session = self.get_session(file_id)
+        if session is None or session.direction != "send":
+            return
+
+        if accepted:
+            session.status = "accepted"
+            self.transfer_accepted.emit(file_id)
+            t = threading.Thread(
+                target=self._send_chunks_thread, args=(file_id,), daemon=True
+            )
+            t.start()
+        else:
+            session.status = "rejected"
+            self.transfer_rejected.emit(file_id)
+            logger.info(f"[FileTransfer] 对方拒绝了文件: {file_id}")
+            self._remove_session(file_id)
 
 
-import json
+__all__ = ["FileTransferSession", "FileTransferManager", "CHUNK_SIZE"]

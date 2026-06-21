@@ -1,1235 +1,1362 @@
 """
-Main Window for Online Collaboration Suite
-Provides tab-based interface with Contacts, Chat, File Transfer, and Remote Desktop tabs.
+ConnectHub 主窗口（Tkinter 实现，无 PyQt5）。
+
+负责：
+  - 把 ContactListWidget / ChatTabWidget / FileTransferManager / Updater
+    组合成一个完整的主窗口 UI
+  - 处理来自 WebSocket 客户端的消息并分派到各子模块
+  - 管理文件传输标签页与远程桌面标签页
+  - 提供登出、检查更新等顶层操作的信号
+
+所有由后台线程（WebSocket 接收线程等）触发的 UI 更新都通过
+``master.after(0, callback)`` 调度到 Tk 主线程，保证线程安全。
 """
 
+import base64
+import io
+import json
 import logging
 import os
-import base64
-import uuid
-import time
-from typing import Optional, Dict, List
-
-
-# Add project root and client dir to path for module imports (cross-platform)
+import sys
+import threading
+import tkinter as tk
+from datetime import datetime
 from pathlib import Path
-_project_root = Path(__file__).parent.parent.resolve()
-import sys as _sys
-_sys.path.insert(0, str(_project_root))
-_sys.path.insert(0, str(Path(__file__).parent))
+from tkinter import filedialog, messagebox, ttk
+from typing import Any, Dict, List, Optional
 
-from PyQt5.QtCore import Qt, QTimer, pyqtSlot, pyqtSignal, QBuffer, QByteArray
-from PyQt5.QtGui import QIcon, QCloseEvent, QPixmap, QImage, QColor
-from PyQt5.QtWidgets import (
-    QMainWindow,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QTabWidget,
-    QStatusBar,
-    QMenuBar,
-    QMenu,
-    QAction,
-    QLabel,
-    QMessageBox,
-    QToolBar,
-    QDockWidget,
-    QListWidget,
-    QListWidgetItem,
-    QSplitter,
-    QFrame,
-    QFileDialog,
-    QProgressBar,
-    QTextEdit,
-    QGroupBox,
-    QPushButton,
-    QApplication,
-    QComboBox,
-)
+# ---- 模块导入：保证能从 protocol / client 子包导入 ----
+_project_root = Path(__file__).parent.parent.resolve()
+sys.path.insert(0, str(_project_root))
+sys.path.insert(0, str(Path(__file__).parent))
 
 from protocol.messages import Message, MessageType
-from websocket_client import WebSocketClient
-from contact_list import ContactListWidget, UserStatus
-from chat_widget import ChatTabWidget
+from protocol.signals import Signal
+
+from client.contact_list import ContactListWidget
+from client.chat_widget import ChatTabWidget
+from client.file_transfer import FileTransferManager
+from client.updater import Updater
 
 logger = logging.getLogger(__name__)
 
-CHUNK_SIZE = 32 * 1024  # 32KB per chunk for file transfer
+# =============================================================
+# 工具函数
+# =============================================================
+
+def _load_version_info() -> Dict[str, Any]:
+    """从项目根的 version.json 读取版本信息。"""
+    path = _project_root / "version.json"
+    try:
+        if path.exists():
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception as exc:
+        logger.warning(f"读取 version.json 失败: {exc}")
+    return {"version": "0.0.0", "repo_owner": "ccx121014", "repo_name": "ConnectHub"}
 
 
-class FileSendWorker(QObject):
-    """后台线程发送文件分块 — 避免阻塞 UI。"""
+def _human_size(num_bytes: int) -> str:
+    """把字节数格式化为易读字符串。"""
+    if num_bytes is None:
+        return "?"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    size = float(num_bytes)
+    for u in units:
+        if size < 1024 or u == units[-1]:
+            return f"{size:.1f} {u}"
+        size /= 1024
+    return f"{num_bytes} B"
 
-    progress = pyqtSignal(str, int)  # file_id, percent
-    finished = pyqtSignal(str, str)  # file_id, file_name
-    error = pyqtSignal(str, str)  # file_id, error message
 
-    def __init__(self, ws_client, target, file_id, file_path, parent=None):
-        super().__init__(parent)
-        self._ws_client = ws_client
-        self._target = target
-        self._file_id = file_id
-        self._file_path = file_path
-        self._cancelled = False
+# =============================================================
+# 文件传输标签页
+# =============================================================
 
-    def cancel(self):
-        self._cancelled = True
+class FileTransferFrame(ttk.Frame):
+    """文件传输标签页 UI：
+        - 顶部下拉选择目标用户 + 选择并发送文件按钮
+        - 下方滚动区域列出活跃的传输会话（进度条 + 状态）
+    """
 
-    @pyqtSlot()
-    def do_work(self):
+    def __init__(self, master: tk.Misc, ft_manager: FileTransferManager,
+                 get_online_contacts_cb=None, **kwargs):
+        super().__init__(master, **kwargs)
+        self._ft = ft_manager
+        self._get_online_contacts = get_online_contacts_cb or (lambda: [])
+
+        # 存储每个 file_id 的 UI 控件引用
+        self._session_widgets: Dict[str, Dict[str, Any]] = {}
+
+        self._init_ui()
+        self._connect_signals()
+
+    # ---------------------- UI ----------------------
+
+    def _init_ui(self):
+        # 顶部：目标用户 + 发送按钮
+        top = ttk.Frame(self)
+        top.pack(fill="x", padx=8, pady=8)
+
+        ttk.Label(top, text="目标用户:").pack(side="left", padx=(0, 6))
+        self._target_var = tk.StringVar(value="")
+        self._target_combo = ttk.Combobox(
+            top, textvariable=self._target_var,
+            state="readonly", width=25
+        )
+        self._target_combo.pack(side="left", padx=(0, 8))
+
+        self._send_btn = ttk.Button(
+            top, text="选择文件并发送", command=self._on_send_clicked
+        )
+        self._send_btn.pack(side="left")
+
+        # 滚动列表区
+        list_frame = ttk.LabelFrame(self, text="传输列表")
+        list_frame.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+
+        self._canvas = tk.Canvas(list_frame, bg="#FFFFFF", highlightthickness=0)
+        self._scroll = ttk.Scrollbar(
+            list_frame, orient="vertical", command=self._canvas.yview
+        )
+        self._canvas.configure(yscrollcommand=self._scroll.set)
+        self._canvas.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
+        self._scroll.pack(side="right", fill="y", pady=4)
+
+        self._inner = ttk.Frame(self._canvas)
+        self._inner_window = self._canvas.create_window(
+            (0, 0), window=self._inner, anchor="nw"
+        )
+        self._inner.bind(
+            "<Configure>",
+            lambda e: self._canvas.configure(scrollregion=self._canvas.bbox("all"))
+        )
+        self._canvas.bind(
+            "<Configure>",
+            lambda e: self._canvas.itemconfigure(self._inner_window, width=e.width)
+        )
+
+        # 空状态占位
+        self._empty_label = ttk.Label(
+            self._inner, text="（暂无文件传输任务）", foreground="#9E9E9E",
+            padding=12, anchor="center"
+        )
+        self._empty_label.pack(fill="x", pady=8)
+
+        # 滚轮绑定
+        self._bind_mousewheel(self._canvas)
+        self._bind_mousewheel(self._inner)
+
+    def _bind_mousewheel(self, widget):
+        def _on_wheel(event):
+            if event.num == 4:
+                self._canvas.yview_scroll(-1, "units")
+            elif event.num == 5:
+                self._canvas.yview_scroll(1, "units")
+            else:
+                self._canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        widget.bind("<MouseWheel>", _on_wheel)
+        widget.bind("<Button-4>", _on_wheel)
+        widget.bind("<Button-5>", _on_wheel)
+
+    # ---------------------- 信号 ----------------------
+
+    def _connect_signals(self):
+        self._ft.transfer_progress.connect(self._on_progress)
+        self._ft.transfer_completed.connect(self._on_completed)
+        self._ft.transfer_error.connect(self._on_error)
+        self._ft.transfer_accepted.connect(self._on_accepted)
+        self._ft.transfer_rejected.connect(self._on_rejected)
+
+    # ---------------------- 外部操作 ----------------------
+
+    def refresh_targets(self):
+        """下拉菜单刷新为当前在线的联系人列表。"""
+        contacts = list(self._get_online_contacts())
+        self._target_combo["values"] = contacts
+        if self._target_var.get() not in contacts and contacts:
+            self._target_var.set(contacts[0])
+
+    def start_transfer(self, target: str, file_path: str):
+        """启动一个发送任务（由外部调用的便捷入口）。"""
         try:
-            import os as _os
-            if not _os.path.exists(self._file_path):
-                raise RuntimeError("文件不存在")
+            file_id = self._ft.start_transfer(target, file_path)
+            # 立即创建 UI 条目
+            self._ensure_session_row(file_id, target,
+                                     os.path.basename(file_path),
+                                     os.path.getsize(file_path),
+                                     direction="send")
+        except Exception as exc:
+            messagebox.showerror("发送失败", f"无法发送文件: {exc}")
 
-            file_size = _os.path.getsize(self._file_path)
-            file_name = _os.path.basename(self._file_path)
-            total_chunks = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
+    # ---------------------- 内部事件 ----------------------
 
-            with open(self._file_path, "rb") as f:
-                for chunk_index in range(total_chunks):
-                    if self._cancelled:
-                        return
-                    chunk_data = f.read(CHUNK_SIZE)
-                    encoded = base64.b64encode(chunk_data).decode("ascii")
-                    self._ws_client.send_file_transfer_data(
-                        self._target, self._file_id, chunk_index, encoded
-                    )
-                    progress = int((chunk_index + 1) * 100 / total_chunks)
-                    self.progress.emit(self._file_id, progress)
-
-            if not self._cancelled:
-                self._ws_client.send_file_transfer_complete(
-                    self._target, self._file_id, total_chunks
-                )
-                self.finished.emit(self._file_id, file_name)
-        except Exception as e:
-            self.error.emit(self._file_id, str(e))
-
-
-class ConnectionStatusIndicator(QWidget):
-    """Widget showing connection status with color indicator."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._status = "disconnected"
-        self._init_ui()
-
-    def _init_ui(self):
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(5, 0, 5, 0)
-        layout.setSpacing(8)
-
-        self.status_dot = QLabel()
-        self.status_dot.setFixedSize(12, 12)
-        self._apply_dot_style("#9E9E9E")
-        layout.addWidget(self.status_dot)
-
-        self.status_text = QLabel("未连接")
-        self.status_text.setStyleSheet("color: #757575; font-size: 12px; font-weight: 500;")
-        layout.addWidget(self.status_text)
-
-    def _apply_dot_style(self, color: str):
-        self.status_dot.setStyleSheet(
-            f"background-color: {color}; border: 2px solid rgba(255,255,255,0.5); border-radius: 6px;"
-        )
-
-    def set_status(self, status: str):
-        self._status = status
-        if status == "connected":
-            self._apply_dot_style("#4CAF50")
-            self.status_text.setText("已连接")
-            self.status_text.setStyleSheet("color: #2E7D32; font-size: 12px; font-weight: 600;")
-        elif status == "connecting":
-            self._apply_dot_style("#FFC107")
-            self.status_text.setText("连接中...")
-            self.status_text.setStyleSheet("color: #F57F17; font-size: 12px; font-weight: 600;")
-        elif status == "reconnecting":
-            self._apply_dot_style("#FF9800")
-            self.status_text.setText("重新连接中...")
-            self.status_text.setStyleSheet("color: #E65100; font-size: 12px; font-weight: 600;")
-        else:
-            self._apply_dot_style("#9E9E9E")
-            self.status_text.setText("未连接")
-            self.status_text.setStyleSheet("color: #616161; font-size: 12px; font-weight: 600;")
-
-
-class FileTransferWidget(QWidget):
-    """Widget for managing file transfers — shows contact selector + send button + transfer list."""
-
-    # Signals: (target_username, file_path)
-    send_file_request = pyqtSignal(str, str)
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._transfers: Dict[str, Dict] = {}  # file_id -> info
-        self._contacts: List[str] = []  # available contact names
-        self._init_ui()
-
-    def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
-
-        # Header
-        title = QLabel("📁 文件传输")
-        title.setStyleSheet("font-weight: 700; font-size: 15px; color: #212121;")
-        layout.addWidget(title)
-
-        # Control panel: contact selector + send file button
-        control_widget = QWidget()
-        control_widget.setStyleSheet(
-            "QWidget { background: #F9F9FB; border: 1px solid #E0E0E8; border-radius: 10px; }"
-        )
-        control_layout = QVBoxLayout(control_widget)
-        control_layout.setContentsMargins(12, 12, 12, 12)
-        control_layout.setSpacing(10)
-
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("发送给："))
-        self.contact_combo = QComboBox()
-        self.contact_combo.setMinimumWidth(150)
-        self.contact_combo.setStyleSheet(
-            "QComboBox { padding: 6px 10px; border: 1px solid #D0D0D0; border-radius: 6px; background: white; font-size: 12px; min-height: 20px; }"
-            "QComboBox:focus { border: 1px solid #2196F3; }"
-            "QComboBox QAbstractItemView { padding: 4px; border: 1px solid #D0D0D0; }"
-        )
-        row1.addWidget(self.contact_combo, 1)
-
-        self.send_file_btn = QPushButton("📄 选择文件并发送")
-        self.send_file_btn.setMinimumHeight(34)
-        self.send_file_btn.setStyleSheet(
-            "QPushButton { background: #2E7D32; color: white; border: none; border-radius: 6px; padding: 8px 18px; font-weight: 600; font-size: 12px; }"
-            "QPushButton:hover { background: #388E3C; }"
-            "QPushButton:disabled { background: #BDBDBD; color: #EEEEEE; }"
-        )
-        self.send_file_btn.clicked.connect(self._on_send_file_clicked)
-        self.send_file_btn.setEnabled(False)
-        row1.addWidget(self.send_file_btn)
-
-        control_layout.addLayout(row1)
-
-        hint = QLabel("💡 也可以在左侧联系人列表上点击 📁 按钮直接发送文件")
-        hint.setStyleSheet("color: #757575; font-size: 11px;")
-        control_layout.addWidget(hint)
-
-        layout.addWidget(control_widget)
-
-        list_label = QLabel("📜 传输记录：")
-        list_label.setStyleSheet("font-weight: 600; font-size: 12px; color: #424242;")
-        layout.addWidget(list_label)
-
-        self.transfer_list = QListWidget()
-        self.transfer_list.setMinimumHeight(200)
-        self.transfer_list.setStyleSheet(
-            "QListWidget { border: 1px solid #E0E0E8; border-radius: 8px; background: white; padding: 2px; font-size: 12px; }"
-            "QListWidget::item { padding: 8px 10px; border-bottom: 1px solid #F0F0F5; }"
-            "QListWidget::item:hover { background: #F5F5FB; }"
-            "QListWidget::item:selected { background: #E3F2FD; color: #1565C0; }"
-        )
-        layout.addWidget(self.transfer_list, 1)
-
-        self._update_empty_state()
-
-    def _update_empty_state(self):
-        if self.transfer_list.count() == 0:
-            self.transfer_list.addItem("（尚无传输记录 - 选择联系人并发送文件开始）")
-            self.transfer_list.item(0).setFlags(Qt.NoItemFlags)
-            self.transfer_list.item(0).setForeground(QColor("#9E9E9E"))
-
-    def update_contacts(self, contacts: List[str]):
-        """Update available contacts list."""
-        self._contacts = contacts
-        self.contact_combo.clear()
-        if not contacts:
-            self.contact_combo.addItem("（没有在线联系人）")
-            self.contact_combo.setEnabled(False)
-            self.send_file_btn.setEnabled(False)
-        else:
-            for c in contacts:
-                self.contact_combo.addItem(c)
-            self.contact_combo.setEnabled(True)
-            self.send_file_btn.setEnabled(True)
-
-    def _on_send_file_clicked(self):
-        """Handler for send file button."""
-        if not self._contacts:
-            return
-        target = self.contact_combo.currentText().strip()
+    def _on_send_clicked(self):
+        target = self._target_var.get().strip()
         if not target:
+            messagebox.showwarning("提示", "请先选择一个目标用户")
             return
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择要发送的文件", "", "所有文件 (*.*)"
+        file_path = filedialog.askopenfilename(title="选择要发送的文件")
+        if not file_path:
+            return
+        self.start_transfer(target, file_path)
+
+    # 来自 FileTransferManager 的信号回调（可能在后台线程触发）
+
+    def _on_progress(self, file_id: str, sent_bytes: int, total: int):
+        self._run_ui(lambda: self._do_update_progress(file_id, sent_bytes, total))
+
+    def _on_completed(self, file_id: str, local_path: str):
+        self._run_ui(lambda: self._do_mark_completed(file_id, local_path))
+
+    def _on_error(self, file_id: str, error: str):
+        self._run_ui(lambda: self._do_mark_error(file_id, error))
+
+    def _on_accepted(self, file_id: str):
+        self._run_ui(lambda: self._do_set_status(file_id, "传输中"))
+
+    def _on_rejected(self, file_id: str):
+        self._run_ui(lambda: self._do_set_status(file_id, "已拒绝"))
+
+    # ---------------------- UI 更新 ----------------------
+
+    def _ensure_session_row(self, file_id: str, target: str, file_name: str,
+                            file_size: int, direction: str = "send"):
+        """为会话创建一行 UI 条目。如果已存在则忽略。"""
+        if file_id in self._session_widgets:
+            return
+
+        self._empty_label.pack_forget()
+
+        row = ttk.Frame(self._inner, relief="groove", padding=6)
+        row.pack(fill="x", padx=6, pady=4)
+
+        # 第一行：目标 + 文件名 + 方向提示
+        header = ttk.Frame(row)
+        header.pack(fill="x")
+
+        arrow = "→" if direction == "send" else "←"
+        title_text = f"{arrow} {target} — {file_name} ({_human_size(file_size)})"
+        title = ttk.Label(header, text=title_text, anchor="w")
+        title.pack(side="left", fill="x", expand=True)
+
+        cancel_btn = ttk.Button(
+            header, text="取消", width=6,
+            command=lambda fid=file_id: self._cancel_and_remove(fid)
         )
-        if file_path:
-            self.send_file_request.emit(target, file_path)
+        cancel_btn.pack(side="right")
 
-    def add_transfer(self, file_name: str, target: str, direction: str = "send"):
-        """Add new transfer item."""
-        # Remove placeholder if present
-        for i in range(self.transfer_list.count()):
-            item = self.transfer_list.item(i)
-            if item.data(Qt.UserRole) is None:
-                self.transfer_list.takeItem(i)
-                break
+        # 第二行：进度条 + 状态文字
+        bar_row = ttk.Frame(row)
+        bar_row.pack(fill="x", pady=(4, 0))
 
-        key = f"{file_name}_{target}_{direction}_{len(self._transfers)}"
-        self._transfers[key] = {
-            "file_name": file_name, "target": target, "direction": direction, "progress": 0
+        status_var = tk.StringVar(value="等待对方接受")
+        status_label = ttk.Label(bar_row, textvariable=status_var, width=10)
+        status_label.pack(side="left", padx=(0, 8))
+
+        progress = ttk.Progressbar(
+            bar_row, orient="horizontal", mode="determinate", maximum=100
+        )
+        progress.pack(side="left", fill="x", expand=True)
+
+        pct_var = tk.StringVar(value="0%")
+        ttk.Label(bar_row, textvariable=pct_var, width=8, anchor="e").pack(
+            side="left", padx=(8, 0)
+        )
+
+        self._session_widgets[file_id] = {
+            "row": row, "progress": progress,
+            "status_var": status_var, "pct_var": pct_var,
+            "total": file_size, "cancel_btn": cancel_btn,
         }
 
-        icon = "📤 发送" if direction == "send" else "📥 接收"
-        label = f"{icon}: {file_name} → {target}  (0%)"
-        item = QListWidgetItem(label)
-        item.setData(Qt.UserRole, key)
-        item.setForeground(QColor("#2196F3"))
-        self.transfer_list.addItem(item)
-
-    def update_progress(self, transfer_id: str, progress: int):
-        """Update a transfer's progress percentage."""
-        # Match: find item with matching key or file_name substring
-        matched_key = None
-        if transfer_id in self._transfers:
-            matched_key = transfer_id
+    def _do_update_progress(self, file_id: str, sent_bytes: int, total: int):
+        widgets = self._session_widgets.get(file_id)
+        if widgets is None:
+            # 可能是接收端，尚未创建 UI 条目
+            session = self._ft.get_session(file_id)
+            if session is None:
+                return
+            self._ensure_session_row(
+                file_id, session.target, session.file_name or file_id,
+                session.file_size, direction=session.direction
+            )
+            widgets = self._session_widgets.get(file_id)
+            if widgets is None:
+                return
+        if total and total > 0:
+            pct = int(min(100, (sent_bytes / total) * 100))
         else:
-            for k in self._transfers:
-                if transfer_id in k or k in transfer_id:
-                    matched_key = k
-                    break
-        if matched_key is None:
+            pct = 0
+        widgets["progress"]["value"] = pct
+        widgets["pct_var"].set(f"{pct}% ({_human_size(sent_bytes)})")
+        widgets["status_var"].set("传输中")
+
+    def _do_mark_completed(self, file_id: str, local_path: str):
+        widgets = self._session_widgets.get(file_id)
+        if widgets is None:
             return
+        widgets["progress"]["value"] = 100
+        widgets["pct_var"].set("100%")
+        widgets["status_var"].set("已完成")
+        widgets["cancel_btn"].configure(state="disabled")
+        # 把文件位置浮在按钮上作为提示
+        widgets["cancel_btn"].configure(text="完成")
 
-        self._transfers[matched_key]["progress"] = progress
-        for i in range(self.transfer_list.count()):
-            item = self.transfer_list.item(i)
-            if item.data(Qt.UserRole) == matched_key:
-                info = self._transfers[matched_key]
-                direction = info["direction"]
-                icon = "📤 发送" if direction == "send" else "📥 接收"
-                if progress >= 100:
-                    item.setForeground(QColor("#4CAF50"))
-                    item.setText(f"✅ {icon}: {info['file_name']} → {info['target']} (完成 100%)")
-                else:
-                    item.setText(f"{icon}: {info['file_name']} → {info['target']} ({progress}%)")
-                break
+    def _do_mark_error(self, file_id: str, error: str):
+        widgets = self._session_widgets.get(file_id)
+        if widgets is None:
+            return
+        widgets["status_var"].set(f"失败: {error[:20]}")
 
-    def mark_transfer_error(self, transfer_id: str, error: str):
-        """Mark a transfer as failed."""
-        for key in self._transfers:
-            if transfer_id in key or key in transfer_id:
-                for i in range(self.transfer_list.count()):
-                    item = self.transfer_list.item(i)
-                    if item.data(Qt.UserRole) == key:
-                        info = self._transfers[key]
-                        item.setForeground(QColor("#F44336"))
-                        item.setText(f"❌ 失败: {info['file_name']} → {info['target']} ({error})")
-                break
+    def _do_set_status(self, file_id: str, status: str):
+        widgets = self._session_widgets.get(file_id)
+        if widgets is None:
+            return
+        widgets["status_var"].set(status)
 
-    def mark_transfer_error(self, transfer_id: str, error_msg: str):
-        """将某个传输标记为错误。"""
-        for i in range(self.transfer_list.count()):
-            item = self.transfer_list.item(i)
-            if item.data(Qt.UserRole) == transfer_id:
-                item.setText(f"❌ {item.text()} 失败：{error_msg}")
-                item.setForeground(QColor("#C62828"))
-                break
+    def _cancel_and_remove(self, file_id: str):
+        try:
+            self._ft.cancel_transfer(file_id)
+        except Exception:
+            pass
+        widgets = self._session_widgets.get(file_id)
+        if widgets is not None:
+            widgets["row"].destroy()
+            del self._session_widgets[file_id]
+        if not self._session_widgets:
+            self._empty_label.pack(fill="x", pady=8)
 
-    def remove_transfer(self, transfer_id: str):
-        """Remove a transfer from the list (usually done automatically after completion)."""
-        for key in list(self._transfers.keys()):
-            if transfer_id in key or key in transfer_id:
-                del self._transfers[key]
-                for i in range(self.transfer_list.count()):
-                    item = self.transfer_list.item(i)
-                    if item.data(Qt.UserRole) == key:
-                        self.transfer_list.takeItem(i)
-                        break
-        self._update_empty_state()
+    def _run_ui(self, fn):
+        """把 UI 操作调度到 Tk 主线程。"""
+        try:
+            root = self.winfo_toplevel()
+            if root is not None and hasattr(root, "after"):
+                root.after(0, fn)
+                return
+        except Exception:
+            pass
+        # 回退：直接调用
+        try:
+            fn()
+        except Exception as exc:
+            logger.debug(f"FileTransferFrame UI 更新异常: {exc}")
 
 
-class RemoteDesktopWidget(QWidget):
-    """Widget for remote desktop sharing — contact selector + start/stop + video preview."""
+# =============================================================
+# 远程桌面标签页
+# =============================================================
 
-    # (target_username)
-    start_share_request = pyqtSignal(str)
-    stop_share_request = pyqtSignal()
+class DesktopFrame(ttk.Frame):
+    """远程桌面标签页：
+        - 顶部：目标用户下拉 + 请求共享 / 停止共享 按钮 + 状态
+        - 中部：显示收到的画面帧
+        - 若本机安装 Pillow，可用屏幕截图主动共享给对方
+    """
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self._sharing = False
-        self._viewing = False
-        self._current_user = ""
-        self._contacts: List[str] = []
+    def __init__(self, master: tk.Misc, ws_client=None,
+                 get_online_contacts_cb=None, **kwargs):
+        super().__init__(master, **kwargs)
+        self._ws = ws_client
+        self._get_online_contacts = get_online_contacts_cb or (lambda: [])
+
+        self._capturing = False
+        self._capture_timer: Optional[threading.Timer] = None
+        self._frame_refs: List[Any] = []  # 防止 PhotoImage 被 GC
+        self._sharer_target: Optional[str] = None  # 正在请求我屏幕的用户
+
+        # 检测 Pillow
+        self._pil_available = False
+        try:
+            import PIL.ImageGrab  # noqa: F401
+            import PIL.Image  # noqa: F401
+            import PIL.ImageTk  # noqa: F401
+            self._pil_available = True
+        except Exception:
+            self._pil_available = False
 
         self._init_ui()
 
+    # ---------------------- UI ----------------------
+
     def _init_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(12)
+        top = ttk.Frame(self)
+        top.pack(fill="x", padx=8, pady=8)
 
-        title = QLabel("🖥 远程桌面")
-        title.setStyleSheet("font-weight: 700; font-size: 15px; color: #212121;")
-        layout.addWidget(title)
-
-        control_widget = QWidget()
-        control_widget.setStyleSheet(
-            "QWidget { background: #F9F9FB; border: 1px solid #E0E0E8; border-radius: 10px; }"
+        ttk.Label(top, text="目标用户:").pack(side="left", padx=(0, 6))
+        self._target_var = tk.StringVar(value="")
+        self._target_combo = ttk.Combobox(
+            top, textvariable=self._target_var, state="readonly", width=25
         )
-        control_layout = QVBoxLayout(control_widget)
-        control_layout.setContentsMargins(12, 12, 12, 12)
-        control_layout.setSpacing(10)
+        self._target_combo.pack(side="left", padx=(0, 8))
 
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("共享给："))
-        self.contact_combo = QComboBox()
-        self.contact_combo.setMinimumWidth(150)
-        self.contact_combo.setStyleSheet(
-            "QComboBox { padding: 6px 10px; border: 1px solid #D0D0D0; border-radius: 6px; background: white; font-size: 12px; min-height: 20px; }"
-            "QComboBox:focus { border: 1px solid #2196F3; }"
+        self._request_btn = ttk.Button(
+            top, text="请求共享屏幕", command=self._on_request_share
         )
-        row1.addWidget(self.contact_combo, 1)
+        self._request_btn.pack(side="left", padx=(0, 6))
 
-        self.start_button = QPushButton("▶ 发起桌面共享")
-        self.start_button.setMinimumHeight(34)
-        self.start_button.setStyleSheet(
-            "QPushButton { background: #1565C0; color: white; border: none; border-radius: 6px; padding: 8px 16px; font-weight: 600; font-size: 12px; }"
-            "QPushButton:hover { background: #1976D2; }"
-            "QPushButton:disabled { background: #BDBDBD; color: #EEEEEE; }"
+        self._stop_btn = ttk.Button(
+            top, text="停止共享", command=self._on_stop, state="disabled"
         )
-        self.start_button.clicked.connect(self._on_start_clicked)
-        self.start_button.setEnabled(False)
-        row1.addWidget(self.start_button)
+        self._stop_btn.pack(side="left")
 
-        self.stop_button = QPushButton("⏹ 停止")
-        self.stop_button.setMinimumHeight(34)
-        self.stop_button.setStyleSheet(
-            "QPushButton { background: #C62828; color: white; border: none; border-radius: 6px; padding: 8px 16px; font-weight: 600; font-size: 12px; }"
-            "QPushButton:hover { background: #D32F2F; }"
-            "QPushButton:disabled { background: #BDBDBD; color: #EEEEEE; }"
+        self._status_var = tk.StringVar(value="就绪")
+        ttk.Label(self, textvariable=self._status_var,
+                  anchor="w", padding=(8, 4)).pack(fill="x")
+
+        # 显示区：大 Label，绑定 resize
+        self._display_container = ttk.Frame(self, relief="sunken", padding=4)
+        self._display_container.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+
+        self._display_canvas = tk.Canvas(
+            self._display_container, bg="#1E1E1E", highlightthickness=0
         )
-        self.stop_button.clicked.connect(self._on_stop_clicked)
-        self.stop_button.setEnabled(False)
-        row1.addWidget(self.stop_button)
-
-        control_layout.addLayout(row1)
-
-        hint = QLabel("💡 也可以在左侧联系人列表上点击 🖥 按钮直接发起共享")
-        hint.setStyleSheet("color: #757575; font-size: 11px;")
-        control_layout.addWidget(hint)
-
-        layout.addWidget(control_widget)
-
-        self.status_label = QLabel("未共享桌面")
-        self.status_label.setStyleSheet("color: #616161; padding: 10px; font-weight: 600; background: #F5F5FB; border-radius: 6px;")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.status_label)
-
-        self.preview_label = QLabel("桌面画面将在此处显示")
-        self.preview_label.setMinimumSize(500, 300)
-        self.preview_label.setStyleSheet(
-            "background-color: #1A1A2E; color: #B0B0C8; border: 1px solid #3A3A5A; border-radius: 10px; font-size: 13px; font-weight: 500;"
+        self._display_canvas.pack(fill="both", expand=True)
+        self._canvas_image_id = self._display_canvas.create_text(
+            0, 0, anchor="nw", text="", fill="#CCCCCC",
+            font=("TkDefaultFont", 11)
         )
-        self.preview_label.setAlignment(Qt.AlignCenter)
-        layout.addWidget(self.preview_label, 1)
+        self._show_message("（尚无共享画面）")
 
-    def update_contacts(self, contacts: List[str]):
-        """Update available contact list."""
-        self._contacts = contacts
-        self.contact_combo.clear()
-        if not contacts:
-            self.contact_combo.addItem("（没有在线联系人）")
-            self.contact_combo.setEnabled(False)
-            self.start_button.setEnabled(False)
+        # 如果没有 Pillow，显示提示
+        if not self._pil_available:
+            ttk.Label(
+                self,
+                text="提示：未检测到 Pillow 库，屏幕共享功能不可用。"
+                     "可使用 `pip install Pillow` 安装。",
+                foreground="#B71C1C", padding=(8, 4), anchor="w"
+            ).pack(fill="x")
+
+    def _show_message(self, text: str):
+        self._display_canvas.delete("all")
+        self._canvas_image_id = self._display_canvas.create_text(
+            10, 10, anchor="nw", text=text, fill="#CCCCCC",
+            font=("TkDefaultFont", 11)
+        )
+
+    # ---------------------- 外部操作 ----------------------
+
+    def set_websocket_client(self, ws_client):
+        self._ws = ws_client
+
+    def refresh_targets(self):
+        contacts = list(self._get_online_contacts())
+        self._target_combo["values"] = contacts
+        if self._target_var.get() not in contacts and contacts:
+            self._target_var.set(contacts[0])
+
+    def show_incoming_request(self, from_user: str, on_accept, on_reject):
+        """弹窗提示：用户 X 想共享屏幕给你（或想请求你屏幕）。"""
+        self._sharer_target = from_user
+        try:
+            result = messagebox.askyesno(
+                "远程桌面请求",
+                f"用户 {from_user} 想共享屏幕 / 或请求你的屏幕。\n是否接受？",
+                parent=self
+            )
+        except Exception:
+            try:
+                root = self.winfo_toplevel()
+                result = messagebox.askyesno(
+                    "远程桌面请求",
+                    f"用户 {from_user} 想共享屏幕给你。\n是否接受？",
+                )
+            except Exception:
+                result = False
+        if result:
+            on_accept()
         else:
-            for c in contacts:
-                self.contact_combo.addItem(c)
-            self.contact_combo.setEnabled(True)
-            if not self._sharing and not self._viewing:
-                self.start_button.setEnabled(True)
+            on_reject()
 
-    def _on_start_clicked(self):
-        if not self._contacts:
-            return
-        target = self.contact_combo.currentText().strip()
+    def display_frame(self, image_data_b64: str, width: int, height: int):
+        """解码一帧画面并显示（从 WebSocket 接收帧时调用）。"""
+        self._run_ui(lambda: self._do_display_frame(image_data_b64, width, height))
+
+    def set_status(self, status: str):
+        self._run_ui(lambda: self._status_var.set(status))
+
+    def stop_all(self):
+        self._stop_capture_loop()
+        self._run_ui(lambda: self._status_var.set("已停止"))
+
+    # ---------------------- 内部事件 ----------------------
+
+    def _on_request_share(self):
+        target = self._target_var.get().strip()
         if not target:
+            messagebox.showwarning("提示", "请先选择一个目标用户")
             return
-        self.start_share_request.emit(target)
+        if self._ws is None:
+            messagebox.showerror("错误", "WebSocket 尚未连接")
+            return
+        try:
+            self._ws.send_desktop_share_request(target)
+        except Exception as exc:
+            logger.exception(f"发送桌面共享请求失败: {exc}")
+        self._status_var.set(f"正在请求 {target}...")
 
-    def _on_stop_clicked(self):
-        """Stop sharing/viewing on user click."""
-        self.stop_share_request.emit()
-        # Also clear pixmap
-        self.preview_label.clear()
-        self.preview_label.setText("桌面画面已停止")
-        self.preview_label.setStyleSheet(
-            "background-color: #2D2D2D; color: #9E9E9E; border-radius: 6px; font-size: 13px;"
-        )
-        self.set_status("idle", "")
+    def _on_stop(self):
+        """停止本地屏幕抓取；也通知对方停止。"""
+        self._stop_capture_loop()
+        target = self._target_var.get().strip()
+        if target and self._ws is not None:
+            try:
+                self._ws.send_desktop_stop(target)
+            except Exception:
+                pass
+        self._status_var.set("已停止")
+        self._request_btn.configure(state="normal")
+        self._stop_btn.configure(state="disabled")
 
-    def set_status(self, mode: str, user: str = ""):
-        """Set widget status: idle / sharing / viewing."""
-        self._current_user = user
-        if mode == "sharing":
-            self._sharing = True
-            self._viewing = False
-            self.status_label.setText(f"✅ 正在向 {user} 共享桌面...")
-            self.status_label.setStyleSheet("color: #4CAF50; padding: 8px; font-weight: bold;")
-            self.start_button.setEnabled(False)
-            self.stop_button.setEnabled(True)
-            self.preview_label.setText("（正在捕获并发送桌面画面...）")
-            self.preview_label.setStyleSheet(
-                "background-color: #1F3A1F; color: #4CAF50; border-radius: 6px; font-size: 13px; padding: 20px;"
+    def start_capture_loop(self, target: str):
+        """对方接受请求后，开启定时屏幕采集并发送帧。"""
+        if not self._pil_available:
+            messagebox.showwarning(
+                "无法共享", "未检测到 Pillow 库，无法进行屏幕捕获。"
             )
-        elif mode == "viewing":
-            self._sharing = False
-            self._viewing = True
-            self.status_label.setText(f"👁 正在查看 {user} 的桌面...")
-            self.status_label.setStyleSheet("color: #2196F3; padding: 8px; font-weight: bold;")
-            self.start_button.setEnabled(False)
-            self.stop_button.setEnabled(True)
-            self.preview_label.setText("（等待桌面画面到达...）")
-            self.preview_label.setStyleSheet(
-                "background-color: #1F2A3A; color: #2196F3; border-radius: 6px; font-size: 13px; padding: 20px;"
-            )
+            return
+        if self._capturing:
+            return
+        self._capturing = True
+        self._sharer_target = target
+        self._request_btn.configure(state="disabled")
+        self._stop_btn.configure(state="normal")
+        self._status_var.set(f"正在向 {target} 共享屏幕...")
+        self._schedule_capture()
+
+    def _schedule_capture(self):
+        if not self._capturing:
+            return
+        # 先抓取一张，再安排下一次；使用 after 保证在主线程
+        try:
+            self._capture_and_send()
+        except Exception as exc:
+            logger.debug(f"屏幕截图/发送异常: {exc}")
+        # 每 200ms 一帧
+        self.after(200, self._schedule_capture)
+
+    def _capture_and_send(self):
+        if not self._pil_available or not self._capturing:
+            return
+        if not self._sharer_target or self._ws is None:
+            return
+        try:
+            from PIL import ImageGrab, Image
+            screen = ImageGrab.grab()
+            # 压缩尺寸，降低传输带宽
+            max_w, max_h = 960, 540
+            orig_w, orig_h = screen.size
+            ratio = min(max_w / orig_w, max_h / orig_h, 1.0)
+            if ratio < 1.0:
+                screen = screen.resize(
+                    (int(orig_w * ratio), int(orig_h * ratio)), Image.NEAREST
+                )
+            # JPEG 压缩到内存
+            buf = io.BytesIO()
+            screen.convert("RGB").save(buf, format="JPEG", quality=60)
+            b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+            self._ws.send_desktop_frame(self._sharer_target, b64,
+                                        screen.size[0], screen.size[1])
+        except Exception as exc:
+            logger.debug(f"截图/发送异常: {exc}")
+
+    def _stop_capture_loop(self):
+        self._capturing = False
+        if self._capture_timer is not None:
+            try:
+                self._capture_timer.cancel()
+            except Exception:
+                pass
+            self._capture_timer = None
+
+    def _do_display_frame(self, image_data_b64: str, width: int, height: int):
+        try:
+            img_bytes = base64.b64decode(image_data_b64)
+        except Exception as exc:
+            logger.debug(f"base64 解码失败: {exc}")
+            return
+
+        # 尝试用 Pillow 解码 JPEG；否则退化为二进制显示
+        photo = None
+        try:
+            if self._pil_available:
+                from PIL import Image, ImageTk
+                pil = Image.open(io.BytesIO(img_bytes))
+                # 根据 Canvas 尺寸做缩放
+                cw = max(self._display_canvas.winfo_width(), 100)
+                ch = max(self._display_canvas.winfo_height(), 100)
+                iw, ih = pil.size
+                ratio = min(cw / iw, ch / ih, 1.0) if iw and ih else 1.0
+                if ratio < 1.0:
+                    pil = pil.resize((int(iw * ratio), int(ih * ratio)), Image.NEAREST)
+                photo = ImageTk.PhotoImage(pil)
+        except Exception as exc:
+            logger.debug(f"帧解码失败: {exc}")
+
+        if photo is None:
+            self._status_var.set("帧解码失败（需要 Pillow）")
+            return
+
+        # 更新 Canvas
+        self._display_canvas.delete("all")
+        cx = self._display_canvas.winfo_width() // 2
+        cy = self._display_canvas.winfo_height() // 2
+        self._display_canvas.create_image(cx, cy, image=photo, anchor="center")
+
+        # 保持引用，避免被 GC
+        self._frame_refs.append(photo)
+        if len(self._frame_refs) > 3:
+            self._frame_refs = self._frame_refs[-3:]
+
+        self._status_var.set(f"正在接收 {width}x{height}")
+
+    def _run_ui(self, fn):
+        try:
+            root = self.winfo_toplevel()
+            if root is not None and hasattr(root, "after"):
+                root.after(0, fn)
+                return
+        except Exception:
+            pass
+        try:
+            fn()
+        except Exception as exc:
+            logger.debug(f"DesktopFrame UI 更新异常: {exc}")
+
+
+# =============================================================
+# 主窗口
+# =============================================================
+
+class MainWindow(ttk.Frame):
+    """ConnectHub 主窗口。
+
+    公共 API:
+        set_websocket_client(client)
+        set_username(username)
+        show()            -> 确保窗口可见
+        close()           -> 清理并关闭窗口
+
+    信号 (Signal):
+        logout_requested()  -> 由 app.py 处理登出
+    """
+
+    def __init__(self, master: Optional[tk.Misc] = None):
+        # 如果没传 master，就创建一个隐藏的 Tk 根
+        if master is None:
+            try:
+                master = tk.Tk()
+                master.withdraw()
+                self._own_root = True
+            except Exception:
+                master = None
+                self._own_root = False
         else:
-            self._sharing = False
-            self._viewing = False
-            self.status_label.setText("未共享桌面")
-            self.status_label.setStyleSheet("color: #757575; padding: 8px; font-weight: bold;")
-            self.start_button.setEnabled(bool(self._contacts))
-            self.stop_button.setEnabled(False)
-            self.preview_label.clear()
-            self.preview_label.setText("桌面画面将在此处显示")
-            self.preview_label.setStyleSheet(
-                "background-color: #2D2D2D; color: #9E9E9E; border-radius: 6px; font-size: 13px;"
-            )
+            self._own_root = False
 
-    def update_preview(self, pixmap, sender: str = ""):
-        """Update the preview with a new screenshot from sender."""
-        if pixmap is None or pixmap.isNull():
-            return
-        scaled = pixmap.scaled(
-            max(self.preview_label.width(), 400),
-            max(self.preview_label.height(), 300),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
-        )
-        self.preview_label.setPixmap(scaled)
-        if sender:
-            self.status_label.setText(f"👁 正在查看 {sender} 的桌面")
+        super().__init__(master, padding=0)
+        self.master = master
 
-
-class MainWindow(QMainWindow):
-    """
-    Main application window with tab-based interface.
-    Signals:
-        logout_requested: Emitted when user logs out
-    """
-
-    logout_requested = pyqtSignal()
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
+        # 依赖：外部通过 setter 注入
+        self._ws_client = None
         self._username: Optional[str] = None
-        self._ws_client: Optional[WebSocketClient] = None
 
-        # 文件传输状态: file_id -> {'chunks': {index: data}, 'total': N, 'sender': '...', 'name': '...', 'size': S}
-        self._incoming_files: Dict[str, Dict] = {}
-        # 发送中的文件: file_id -> {'target': '...', 'name': '...', 'file_path': '...', 'chunks': N}
-        self._pending_sends: Dict[str, str] = {}  # file_id -> file_path (waiting for response)
+        # 版本信息
+        self._version_info = _load_version_info()
+        self._version: str = self._version_info.get("version", "0.0.0")
 
-        # 后台文件发送线程管理
-        self._file_workers: Dict[str, QObject] = {}  # file_id -> worker
-        self._file_threads: Dict[str, QObject] = {}  # file_id -> thread
+        # 信号
+        self.logout_requested = Signal()
 
-        # 桌面共享状态
-        self._desktop_share_target: Optional[str] = None  # who we are sharing with
-        self._desktop_viewing_from: Optional[str] = None  # who is sharing to us
-        self._desktop_timer = QTimer(self)
-        self._desktop_timer.setInterval(500)  # 2 FPS
-        self._desktop_timer.timeout.connect(self._send_desktop_frame)
+        # 子模块管理器
+        self._ft_manager = FileTransferManager(websocket_client=None,
+                                               username=None)
 
-        self._init_ui()
-        self._create_menus()
-        self._create_toolbars()
-        self._create_status_bar()
+        # 更新器
+        self._updater = Updater(master=self.master,
+                                version_file=str(_project_root / "version.json"))
 
-    def _init_ui(self):
-        """Initialize the user interface."""
-        self.setWindowTitle("在线协作套件")
-        self.setMinimumSize(900, 600)
+        # UI 组件引用
+        self._contact_list: Optional[ContactListWidget] = None
+        self._chat_tabs: Optional[ChatTabWidget] = None
+        self._ft_frame: Optional[FileTransferFrame] = None
+        self._desktop_frame: Optional[DesktopFrame] = None
 
-        # Central widget with tab interface
-        self.central_widget = QWidget()
-        self.setCentralWidget(self.central_widget)
+        self._status_text: Optional[tk.StringVar] = None
+        self._user_label: Optional[tk.Label] = None
+        self._title_label: Optional[tk.Label] = None
 
-        main_layout = QVBoxLayout(self.central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
+        self._notebook: Optional[ttk.Notebook] = None
 
-        # Create splitter for contact list + chat area
-        splitter = QSplitter(Qt.Horizontal)
+        # 构建 UI
+        self._build_ui()
 
-        # Left side - Contact list in a dock
-        self.contact_list_widget = ContactListWidget()
-        self.contact_list_widget.contact_double_clicked.connect(self._on_contact_double_clicked)
-        self.contact_list_widget.start_chat_request.connect(self._on_start_chat)
-        self.contact_list_widget.start_file_transfer.connect(self._on_file_transfer_request)
-        self.contact_list_widget.start_desktop_share.connect(self._on_desktop_share_request)
+        # 配置窗口
+        if self.master is not None:
+            self._configure_top_level()
+            self.pack(fill="both", expand=True)
 
-        contacts_dock = QDockWidget("联系人", self)
-        contacts_dock.setWidget(self.contact_list_widget)
-        contacts_dock.setMaximumWidth(250)
-        self.addDockWidget(Qt.LeftDockWidgetArea, contacts_dock)
+    # =========================================================
+    # 公共 API
+    # =========================================================
 
-        # Right side - Tab widget for chats and other features
-        self.tab_widget = QTabWidget()
-
-        # Chat tab
-        self.chat_tab = ChatTabWidget()
-        self.chat_tab.message_sent.connect(self._on_message_sent)
-        self.tab_widget.addTab(self.chat_tab, "💬 聊天")
-
-        # File transfer tab
-        self.file_transfer_widget = FileTransferWidget()
-        self.file_transfer_widget.send_file_request.connect(self._on_file_transfer_from_widget)
-        self.tab_widget.addTab(self.file_transfer_widget, "📁 文件传输")
-
-        # Remote desktop tab
-        self.remote_desktop_widget = RemoteDesktopWidget()
-        self.remote_desktop_widget.start_share_request.connect(self._on_desktop_share_from_widget)
-        self.remote_desktop_widget.stop_share_request.connect(self._on_desktop_stop_from_widget)
-        self.tab_widget.addTab(self.remote_desktop_widget, "🖥️ 远程桌面")
-
-        splitter.addWidget(self.tab_widget)
-        splitter.setSizes([700, 200])
-
-        main_layout.addWidget(splitter)
-
-        # Connection status indicator
-        self.connection_indicator = ConnectionStatusIndicator()
-
-    def _create_menus(self):
-        """Create the menu bar."""
-        menubar = self.menuBar()
-
-        # File menu
-        file_menu = menubar.addMenu("文件(&F)")
-
-        logout_action = QAction("退出登录(&L)", self)
-        logout_action.setShortcut("Ctrl+Q")
-        logout_action.triggered.connect(self._on_logout)
-        file_menu.addAction(logout_action)
-
-        file_menu.addSeparator()
-
-        exit_action = QAction("退出(&X)", self)
-        exit_action.setShortcut("Ctrl+Shift+Q")
-        exit_action.triggered.connect(self.close)
-        file_menu.addAction(exit_action)
-
-        # Edit menu
-        edit_menu = menubar.addMenu("编辑(&E)")
-
-        copy_action = QAction("复制(&C)", self)
-        copy_action.setShortcut("Ctrl+C")
-        edit_menu.addAction(copy_action)
-
-        paste_action = QAction("粘贴(&V)", self)
-        paste_action.setShortcut("Ctrl+V")
-        edit_menu.addAction(paste_action)
-
-        # View menu
-        view_menu = menubar.addMenu("视图(&V)")
-
-        contacts_action = QAction("显示/隐藏联系人", self)
-        contacts_action.setShortcut("Ctrl+T")
-        view_menu.addAction(contacts_action)
-
-        fullscreen_action = QAction("全屏", self)
-        fullscreen_action.setShortcut("F11")
-        fullscreen_action.triggered.connect(self._toggle_fullscreen)
-        view_menu.addAction(fullscreen_action)
-
-        # Help menu
-        help_menu = menubar.addMenu("帮助(&H)")
-
-        about_action = QAction("关于", self)
-        about_action.triggered.connect(self._on_about)
-        help_menu.addAction(about_action)
-
-        help_action = QAction("使用帮助", self)
-        help_action.setShortcut("F1")
-        help_menu.addAction(help_action)
-
-    def _create_toolbars(self):
-        """Create toolbars."""
-        # Main toolbar
-        main_toolbar = QToolBar("主工具栏")
-        main_toolbar.setMovable(False)
-        self.addToolBar(main_toolbar)
-
-        # Connection status to toolbar
-        main_toolbar.addWidget(QLabel("状态: "))
-        main_toolbar.addWidget(self.connection_indicator)
-
-        main_toolbar.addSeparator()
-
-        # Quick actions
-        refresh_action = QAction("刷新联系人", self)
-        refresh_action.triggered.connect(self._refresh_contacts)
-        main_toolbar.addAction(refresh_action)
-
-    def _create_status_bar(self):
-        """Create the status bar."""
-        self.statusBar().showMessage("就绪")
-
-    def set_websocket_client(self, client: WebSocketClient):
-        """Set the WebSocket client for communication."""
+    def set_websocket_client(self, client):
+        """注入 WebSocket 客户端并连接其信号。"""
         self._ws_client = client
-        # 所有信号来自 SignalBridge (client.signals)
-        client.signals.message_received.connect(self._on_message_received)
-        client.signals.connected.connect(self._on_connected)
-        client.signals.disconnected.connect(self._on_disconnected)
-        client.signals.reconnecting.connect(self._on_reconnecting)
-        client.signals.connection_failed.connect(self._on_connection_failed)
+        self._ft_manager.set_websocket_client(client)
+        if self._desktop_frame is not None:
+            self._desktop_frame.set_websocket_client(client)
+
+        # 连接 WebSocket 信号
+        if client is not None and hasattr(client, "signals"):
+            sigs = client.signals
+            sigs.connected.connect(self._on_ws_connected)
+            sigs.disconnected.connect(self._on_ws_disconnected)
+            sigs.error_occurred.connect(self._on_ws_error)
+            sigs.message_received.connect(self._on_ws_message)
+            sigs.reconnecting.connect(self._on_ws_reconnecting)
+            sigs.connection_failed.connect(self._on_ws_connection_failed)
+
+        self._update_status_bar()
 
     def set_username(self, username: str):
-        """Set the current username."""
+        """设置当前登录用户名。"""
         self._username = username
-        self.setWindowTitle(f"在线协作套件 - {username}")
-        self.contact_list_widget.set_username(username)
-        self.chat_tab.set_username(username)
+        if self._contact_list is not None:
+            self._contact_list.set_username(username)
+        if self._chat_tabs is not None:
+            self._chat_tabs.set_username(username)
+        self._ft_manager.set_username(username)
 
-    def _on_contact_double_clicked(self, username: str):
-        """Handle contact double click - start chat."""
-        self.chat_tab.open_chat(username, is_group=False)
+        if self._user_label is not None:
+            short = (username[:10] + "…") if len(username or "") > 10 else (username or "")
+            self._user_label.configure(
+                text=f"{(username or '?')[:1].upper()}  {short or '未登录'}"
+            )
 
-    def _on_start_chat(self, username: str):
-        """Handle start chat request."""
-        self.chat_tab.open_chat(username, is_group=False)
-        self.tab_widget.setCurrentWidget(self.chat_tab)
+        self._update_status_bar()
 
-    def _on_file_transfer_request(self, username: str):
-        """Handle file transfer request from contact list click — show file dialog and send chunks."""
-        if not self._ws_client:
-            QMessageBox.warning(self, "未连接", "无法发送文件：WebSocket 未连接")
+    def show(self):
+        """显示主窗口。"""
+        if self.master is not None:
+            try:
+                self.master.deiconify()
+            except Exception:
+                pass
+            try:
+                self.master.lift()
+            except Exception:
+                pass
+            try:
+                self.master.focus_force()
+            except Exception:
+                pass
+
+    def close(self):
+        """关闭并清理资源。"""
+        try:
+            self._stop_all()
+        except Exception:
+            pass
+        if self._own_root and self.master is not None:
+            try:
+                self.master.destroy()
+            except Exception:
+                pass
+
+    # =========================================================
+    # UI 构建
+    # =========================================================
+
+    def _configure_top_level(self):
+        if self.master is None:
             return
+        try:
+            self.master.title(f"ConnectHub v{self._version}")
+        except Exception:
+            pass
+        try:
+            self.master.geometry("1024x640")
+        except Exception:
+            pass
+        try:
+            self.master.minsize(820, 520)
+        except Exception:
+            pass
 
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "选择要发送的文件",
-            "",
-            "所有文件 (*.*)"
+    def _build_ui(self):
+        # 顶部 Header
+        header = tk.Frame(self, bg="#1976D2", height=52)
+        header.pack(fill="x")
+        header.pack_propagate(False)
+
+        # 左侧：用户头像 + 用户名
+        user_frame = tk.Frame(header, bg="#1976D2")
+        user_frame.pack(side="left", padx=12)
+        self._user_label = tk.Label(
+            user_frame, text="?  未登录", bg="#1976D2", fg="#FFFFFF",
+            font=("TkDefaultFont", 11, "bold"), padx=4, pady=4
+        )
+        self._user_label.pack(side="left")
+
+        # 中间：应用名
+        self._title_label = tk.Label(
+            header, text="ConnectHub", bg="#1976D2", fg="#FFFFFF",
+            font=("TkDefaultFont", 14, "bold")
+        )
+        self._title_label.pack(side="left", expand=True)
+
+        # 右侧：按钮
+        right_frame = tk.Frame(header, bg="#1976D2")
+        right_frame.pack(side="right", padx=8)
+
+        self._update_btn = tk.Button(
+            right_frame, text="检查更新", relief="flat",
+            bg="#1565C0", fg="#FFFFFF", activebackground="#0D47A1",
+            activeforeground="#FFFFFF", padx=10, pady=4,
+            command=self._on_check_updates, cursor="hand2"
+        )
+        self._update_btn.pack(side="right", padx=(6, 0))
+
+        self._logout_btn = tk.Button(
+            right_frame, text="登出", relief="flat",
+            bg="#C62828", fg="#FFFFFF", activebackground="#B71C1C",
+            activeforeground="#FFFFFF", padx=10, pady=4,
+            command=self._on_logout_clicked, cursor="hand2"
+        )
+        self._logout_btn.pack(side="right")
+
+        # 主体：PanedWindow（左侧联系人，右侧标签页）
+        body = ttk.Frame(self)
+        body.pack(fill="both", expand=True)
+
+        paned = ttk.PanedWindow(body, orient="horizontal")
+        paned.pack(fill="both", expand=True, padx=4, pady=4)
+
+        # 左侧：联系人列表
+        left_frame = ttk.Frame(paned, width=280)
+        paned.add(left_frame, weight=0)
+
+        self._contact_list = ContactListWidget(left_frame)
+        self._contact_list.pack(fill="both", expand=True)
+
+        # 右侧：Notebook
+        right_frame = ttk.Frame(paned)
+        paned.add(right_frame, weight=3)
+
+        self._notebook = ttk.Notebook(right_frame)
+        self._notebook.pack(fill="both", expand=True)
+        self._notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+
+        # --- 聊天标签 ---
+        chat_host = ttk.Frame(self._notebook)
+        self._chat_tabs = ChatTabWidget(chat_host)
+        self._chat_tabs.pack(fill="both", expand=True)
+        self._notebook.add(chat_host, text="聊天")
+
+        # --- 文件传输标签 ---
+        self._ft_frame = FileTransferFrame(
+            self._notebook, self._ft_manager,
+            get_online_contacts_cb=self._get_online_usernames,
+        )
+        self._notebook.add(self._ft_frame, text="文件传输")
+
+        # --- 远程桌面标签 ---
+        self._desktop_frame = DesktopFrame(
+            self._notebook, ws_client=self._ws_client,
+            get_online_contacts_cb=self._get_online_usernames,
+        )
+        self._notebook.add(self._desktop_frame, text="远程桌面")
+
+        # 底部状态栏
+        status_bar = tk.Frame(self, bg="#EEEEEE", height=24)
+        status_bar.pack(fill="x", side="bottom")
+        status_bar.pack_propagate(False)
+
+        self._status_text = tk.StringVar(value="未连接")
+        tk.Label(
+            status_bar, textvariable=self._status_text, bg="#EEEEEE",
+            fg="#424242", anchor="w", padx=10,
+            font=("TkDefaultFont", 9)
+        ).pack(side="left", fill="x", expand=True)
+
+        tk.Label(
+            status_bar, text=f"v{self._version}", bg="#EEEEEE",
+            fg="#757575", anchor="e", padx=10,
+            font=("TkDefaultFont", 9)
+        ).pack(side="right")
+
+        # 把信号连到事件
+        self._connect_component_signals()
+
+    def _connect_component_signals(self):
+        # 联系人列表 → 打开聊天 / 发送文件 / 请求桌面
+        if self._contact_list is not None:
+            self._contact_list.start_chat_request.connect(self._open_chat_with)
+            self._contact_list.contact_double_clicked.connect(self._open_chat_with)
+            self._contact_list.start_file_transfer.connect(
+                self._start_file_transfer_with
+            )
+            self._contact_list.start_desktop_share.connect(
+                lambda user, _type: self._request_desktop_with(user)
+            )
+
+        # 聊天 → 发送消息
+        if self._chat_tabs is not None:
+            self._chat_tabs.message_sent.connect(self._send_chat_message)
+
+        # 文件传输管理器：请求来时弹窗（主线程弹窗）
+        self._ft_manager.transfer_requested.connect(self._on_transfer_requested)
+
+    # =========================================================
+    # 事件：顶部按钮
+    # =========================================================
+
+    def _on_logout_clicked(self):
+        """用户点击登出：通知上层 app.py，并做一次 stop 清理。"""
+        try:
+            if self._ws_client is not None and hasattr(self._ws_client, "send_logout"):
+                try:
+                    self._ws_client.send_logout()
+                except Exception:
+                    pass
+        finally:
+            self._stop_all()
+            try:
+                self.logout_requested.emit()
+            except Exception as exc:
+                logger.debug(f"logout_requested 回调异常: {exc}")
+
+    def _on_check_updates(self):
+        self._updater.check_for_updates(show_dialog=True)
+
+    def _stop_all(self):
+        if self._desktop_frame is not None:
+            try:
+                self._desktop_frame.stop_all()
+            except Exception:
+                pass
+        if self._chat_tabs is not None:
+            try:
+                self._chat_tabs.close_all_chats()
+            except Exception:
+                pass
+
+    # =========================================================
+    # 事件：联系人 / 聊天 / 文件传输 / 桌面
+    # =========================================================
+
+    def _open_chat_with(self, username: str):
+        if not username or self._chat_tabs is None:
+            return
+        self._chat_tabs.open_chat(username)
+        if self._notebook is not None:
+            # 切换到聊天标签
+            try:
+                self._notebook.select(0)
+            except Exception:
+                pass
+
+    def _start_file_transfer_with(self, username: str):
+        if not username:
+            return
+        file_path = filedialog.askopenfilename(
+            title=f"选择要发送给 {username} 的文件"
         )
         if not file_path:
             return
-        self._initiate_file_transfer(username, file_path)
+        if self._ft_frame is not None:
+            # 设置目标用户并发送
+            try:
+                self._ft_frame._target_var.set(username)
+            except Exception:
+                pass
+            self._ft_frame.start_transfer(username, file_path)
+            # 切到文件传输标签
+            if self._notebook is not None:
+                try:
+                    idx = list(self._notebook.tabs()).index(
+                        str(self._ft_frame)
+                    )
+                    self._notebook.select(idx)
+                except Exception:
+                    try:
+                        self._notebook.select(1)
+                    except Exception:
+                        pass
 
-    def _on_file_transfer_from_widget(self, target: str, file_path: str):
-        """Handle file transfer request initiated from the file transfer widget button."""
-        self._initiate_file_transfer(target, file_path)
-
-    def _initiate_file_transfer(self, username: str, file_path: str):
-        """Initiate a file transfer to given user with given file path."""
-        if not self._ws_client or not os.path.exists(file_path):
-            logger.warning(f"File transfer: WS client or file missing - {file_path}")
+    def _request_desktop_with(self, username: str):
+        if not username:
             return
+        if self._desktop_frame is not None:
+            try:
+                self._desktop_frame._target_var.set(username)
+            except Exception:
+                pass
+            self._desktop_frame._on_request_share()
+            if self._notebook is not None:
+                try:
+                    self._notebook.select(2)
+                except Exception:
+                    pass
 
+    def _send_chat_message(self, target: str, content: str):
+        if self._ws_client is None or not target or not content:
+            return
         try:
-            file_size = os.path.getsize(file_path)
-        except OSError as e:
-            QMessageBox.critical(self, "错误", f"无法读取文件：{e}")
-            return
+            self._ws_client.send_chat_message(target, content)
+        except Exception as exc:
+            logger.debug(f"发送聊天消息失败: {exc}")
 
-        file_name = os.path.basename(file_path)
-        file_id = str(uuid.uuid4())
-        chunk_count = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
+    def _on_transfer_requested(self, file_id: str, sender: str,
+                                file_name: str, file_size: int):
+        """对方请求我接收文件。弹窗：接受（选择保存路径）或拒绝。"""
+        self._run_ui(
+            lambda: self._do_show_transfer_dialog(file_id, sender, file_name, file_size)
+        )
 
-        self.file_transfer_widget.add_transfer(file_name, username, "send")
-        self._pending_sends[file_id] = file_path
-        self._ws_client.send_file_transfer_request(username, file_name, file_size, file_id, chunk_count, CHUNK_SIZE)
-        self.tab_widget.setCurrentWidget(self.file_transfer_widget)
-        self.statusBar().showMessage(f"正在向 {username} 请求发送文件: {file_name}")
-
-    def _handle_file_transfer_request(self, message: Message):
-        """Handle incoming file transfer request from another user."""
-        sender = message.sender
-        file_name = message.payload.get("file_name", "未知文件")
-        file_size = message.payload.get("file_size", 0)
-        file_id = message.payload.get("file_id", "")
-
-        # 显示接受/拒绝对话框
-        mb = QMessageBox(self)
-        mb.setIcon(QMessageBox.Question)
-        mb.setWindowTitle("文件传输请求")
-        mb.setText(f"用户 {sender} 向您发送文件：\n\n{file_name}\n大小: {file_size / 1024:.1f} KB\n\n是否接受？")
-        mb.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        mb.setDefaultButton(QMessageBox.Yes)
-        reply = mb.exec_()
-
-        if reply == QMessageBox.Yes:
-            self._ws_client.send_file_transfer_response(sender, file_id, True)
-            self.file_transfer_widget.add_transfer(file_name, sender, "receive")
-            self._incoming_files[file_id] = {
-                "chunks": {},
-                "total": message.payload.get("chunk_count", 0),
-                "sender": sender,
-                "name": file_name,
-                "size": file_size,
-                "target": self._username or "",
-            }
-            self.statusBar().showMessage(f"已接受来自 {sender} 的文件: {file_name}")
-            self.tab_widget.setCurrentWidget(self.file_transfer_widget)
-        else:
-            self._ws_client.send_file_transfer_response(sender, file_id, False)
-
-    def _handle_file_transfer_response(self, message: Message):
-        """对方响应了文件传输请求 — 接受则开始分块发送。"""
-        file_id = message.payload.get("file_id", "")
-        accepted = message.payload.get("accepted", False)
-        sender = message.sender  # 这里 sender 是响应方（即接收文件的用户）
-
-        if not accepted:
-            QMessageBox.information(self, "文件被拒绝", f"{sender} 拒绝了您的文件传输请求")
-            self._pending_sends.pop(file_id, None)
-            return
-
-        file_path = self._pending_sends.pop(file_id, None)
-        if not file_path or not os.path.exists(file_path):
-            logger.warning(f"File not found for transfer: {file_path}")
-            return
-
-        self._send_file_chunks(sender, file_id, file_path)
-
-    def _send_file_chunks(self, target: str, file_id: str, file_path: str):
-        """用后台线程发送文件分块 — 不再阻塞 UI。"""
+    def _do_show_transfer_dialog(self, file_id: str, sender: str,
+                                  file_name: str, file_size: int):
+        msg = (f"用户 {sender} 希望向你发送文件：\n\n"
+               f"  {file_name}  ({_human_size(file_size)})\n\n"
+               f"是否接受？")
         try:
-            thread = QThread()
-            worker = FileSendWorker(self._ws_client, target, file_id, file_path)
-            worker.moveToThread(thread)
+            accept = messagebox.askyesno("文件传输请求", msg, parent=self)
+        except Exception:
+            try:
+                accept = messagebox.askyesno("文件传输请求", msg)
+            except Exception:
+                accept = False
 
-            worker.progress.connect(
-                lambda fid, pct: self.file_transfer_widget.update_progress(fid, pct)
-            )
-            worker.finished.connect(self._on_file_send_finished)
-            worker.error.connect(self._on_file_send_error)
-
-            thread.started.connect(worker.do_work)
-            worker.finished.connect(thread.quit)
-            worker.finished.connect(worker.deleteLater)
-            worker.error.connect(thread.quit)
-            thread.finished.connect(thread.deleteLater)
-
-            self._file_workers[file_id] = worker
-            self._file_threads[file_id] = thread
-
-            thread.start()
-        except Exception as e:
-            logger.error(f"Error starting file send thread: {e}", exc_info=True)
-            QMessageBox.critical(self, "发送失败", f"启动发送线程时出错：{e}")
-
-    def _on_file_send_finished(self, file_id: str, file_name: str):
-        """文件发送完成的回调。"""
-        self.file_transfer_widget.remove_transfer(file_id)
-        self.statusBar().showMessage(f"文件 {file_name} 发送完成")
-        self._file_workers.pop(file_id, None)
-        self._file_threads.pop(file_id, None)
-        logger.info(f"File transfer completed: {file_name}")
-
-    def _on_file_send_error(self, file_id: str, error_msg: str):
-        """文件发送出错的回调。"""
-        self.file_transfer_widget.mark_transfer_error(file_id, error_msg)
-        self.statusBar().showMessage(f"文件发送失败: {error_msg}")
-        QMessageBox.critical(self, "发送失败", f"发送文件时出错：{error_msg}")
-        self._file_workers.pop(file_id, None)
-        self._file_threads.pop(file_id, None)
-
-    def _handle_file_transfer_data(self, message: Message):
-        """接收文件数据块。"""
-        file_id = message.payload.get("file_id", "")
-        chunk_index = message.payload.get("chunk_index", 0)
-        data = message.payload.get("data", "")
-
-        if file_id not in self._incoming_files:
-            logger.debug(f"Received data chunk for unknown file: {file_id}")
-            return
-
-        self._incoming_files[file_id]["chunks"][chunk_index] = data
-        total = self._incoming_files[file_id].get("total", 0)
-        received = len(self._incoming_files[file_id]["chunks"])
-        if total > 0:
-            progress = int(received * 100 / total)
-            self.file_transfer_widget.update_progress(file_id, progress)
-
-    def _handle_file_transfer_complete(self, message: Message):
-        """文件传输完成 — 组装并保存。"""
-        file_id = message.payload.get("file_id", "")
-        total_chunks = message.payload.get("total_chunks", 0)
-
-        if file_id not in self._incoming_files:
-            return
-
-        info = self._incoming_files[file_id]
-        chunks = info["chunks"]
-
-        if len(chunks) < total_chunks:
-            # 尝试使用所有接收到的数据块
-            logger.warning(f"Incomplete file: {len(chunks)}/{total_chunks} chunks")
-
-        try:
-            # 按顺序组装数据块
-            sorted_indices = sorted(chunks.keys())
-            file_data = b""
-            for idx in sorted_indices:
-                file_data += base64.b64decode(chunks[idx])
-
-            # 选择保存位置
-            default_name = info.get("name", f"received_{file_id}.bin")
-            save_path, _ = QFileDialog.getSaveFileName(
-                self,
-                "保存文件",
-                default_name,
-                "所有文件 (*.*)"
+        if accept:
+            default_name = file_name or f"received_{file_id}"
+            save_path = filedialog.asksaveasfilename(
+                title="选择保存位置", initialfile=default_name
             )
             if save_path:
-                with open(save_path, "wb") as f:
-                    f.write(file_data)
-                self.file_transfer_widget.remove_transfer(file_id)
-                self.statusBar().showMessage(f"文件已保存: {os.path.basename(save_path)}")
-                logger.info(f"File saved: {save_path}")
+                self._ft_manager.accept_transfer(file_id, save_path)
             else:
-                self.file_transfer_widget.remove_transfer(file_id)
-        except Exception as e:
-            logger.error(f"Error saving file: {e}", exc_info=True)
-            QMessageBox.critical(self, "保存失败", f"保存文件时出错：{e}")
-        finally:
-            self._incoming_files.pop(file_id, None)
-
-    def _on_desktop_share_request(self, username: str, share_type: str):
-        """向用户发送桌面共享请求 - 来自联系人列表按钮。"""
-        if not self._ws_client:
-            QMessageBox.warning(self, "未连接", "无法共享桌面：WebSocket 未连接")
-            return
-        self._ws_client.send_desktop_share_request(username, share_type)
-        self.tab_widget.setCurrentWidget(self.remote_desktop_widget)
-        self.statusBar().showMessage(f"已向 {username} 发送桌面共享请求")
-
-    def _on_desktop_share_from_widget(self, username: str):
-        """桌面共享从 widget 发起 - 直接请求。"""
-        self._on_desktop_share_request(username, "view")
-
-    def _on_desktop_stop_from_widget(self):
-        """用户点击 RemoteDesktopWidget 的停止按钮。"""
-        if self._desktop_share_target and self._ws_client:
-            self._ws_client.send_desktop_stop(self._desktop_share_target)
-        if self._desktop_viewing_from and self._ws_client:
-            self._ws_client.send_desktop_stop(self._desktop_viewing_from)
-        self._desktop_timer.stop()
-        self._desktop_share_target = None
-        self._desktop_viewing_from = None
-        self.remote_desktop_widget.set_status("idle", "")
-        self.statusBar().showMessage("已停止桌面共享")
-
-    def _handle_desktop_share_request(self, message: Message):
-        """收到别人的桌面共享请求。"""
-        sender = message.sender
-        share_type = message.payload.get("share_type", "view")
-
-        reply = QMessageBox.question(
-            self,
-            "远程桌面请求",
-            f"用户 {sender} 请求{'控制' if share_type == 'control' else '查看'}您的桌面。\n\n是否接受？",
-            QMessageBox.Yes | QMessageBox.No
-        )
-
-        if reply == QMessageBox.Yes:
-            self._ws_client.send_desktop_share_response(sender, True, share_type)
-            # 开始共享我的桌面
-            self._desktop_share_target = sender
-            self._desktop_timer.start()
-            self.remote_desktop_widget.set_status("sharing", sender)
-            self.tab_widget.setCurrentWidget(self.remote_desktop_widget)
-            self.statusBar().showMessage(f"正在向 {sender} 共享桌面")
+                self._ft_manager.reject_transfer(file_id)
         else:
-            self._ws_client.send_desktop_share_response(sender, False, share_type)
+            self._ft_manager.reject_transfer(file_id)
 
-    def _handle_desktop_share_response(self, message: Message):
-        """对方响应了桌面共享请求。"""
-        sender = message.sender
-        accepted = message.payload.get("accepted", False)
-
-        if accepted:
-            self._desktop_viewing_from = sender
-            self.remote_desktop_widget.set_status("viewing", sender)
-            self.tab_widget.setCurrentWidget(self.remote_desktop_widget)
-            self.statusBar().showMessage(f"正在查看 {sender} 的桌面")
-        else:
-            QMessageBox.information(self, "请求被拒绝", f"{sender} 拒绝了您的桌面共享请求")
-
-    def _send_desktop_frame(self):
-        """捕获当前桌面并发送给共享目标。"""
-        if not self._desktop_share_target or not self._ws_client:
-            return
-
-        try:
-            # 使用 QScreen/grabWindow 捕获整个屏幕
-            screen = QApplication.primaryScreen()
-            if screen is None:
-                return
-            pixmap = screen.grabWindow(0)
-            if pixmap.isNull():
-                return
-
-            # 缩小到合理尺寸减少带宽
-            scaled = pixmap.scaled(800, 600, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
-            # 转换为 JPEG 再 base64 编码
-            buffer = QBuffer()
-            buffer.open(QBuffer.ReadWrite)
-            scaled.save(buffer, "JPG", 70)
-            byte_array = buffer.data()
-            image_data = base64.b64encode(bytes(byte_array)).decode("ascii")
-
-            width = scaled.width()
-            height = scaled.height()
-
-            self._ws_client.send_desktop_frame(self._desktop_share_target, image_data, width, height)
-        except Exception as e:
-            logger.debug(f"Desktop capture error: {e}")
-
-    def _handle_desktop_frame(self, message: Message):
-        """显示收到的桌面屏幕截图。"""
-        try:
-            image_data = message.payload.get("image_data", "")
-            width = message.payload.get("width", 800)
-            height = message.payload.get("height", 600)
-            sender = message.sender
-
-            if not image_data:
-                return
-
-            # Base64 -> QPixmap
-            raw = base64.b64decode(image_data)
-            qbyte = QByteArray(raw)
-            pixmap = QPixmap()
-            pixmap.loadFromData(qbyte, "JPG")
-
-            if not pixmap.isNull():
-                self.remote_desktop_widget.update_preview(pixmap, sender)
-        except Exception as e:
-            logger.debug(f"Desktop frame display error: {e}")
-
-    def _handle_desktop_stop(self, message: Message):
-        """桌面共享停止。"""
-        if self._desktop_share_target or self._desktop_viewing_from:
-            self._desktop_timer.stop()
-            self._desktop_share_target = None
-            self._desktop_viewing_from = None
-            self.remote_desktop_widget.set_status("idle", "")
-            self.statusBar().showMessage("桌面共享已停止")
-
-    def _on_message_sent(self, target: str, content: str):
-        """Handle message sent event."""
-        if self._ws_client and content:
-            self._ws_client.send_chat_message(target, content)
-
-    @pyqtSlot(object)
-    def _on_message_received(self, message):
-        """Handle incoming message from the WebSocket thread."""
-        try:
-            if message.type == MessageType.AUTH_RESPONSE:
-                self._handle_auth_response(message)
-            elif message.type == MessageType.CHAT_MESSAGE:
-                self._handle_chat_message(message)
-            elif message.type == MessageType.GROUP_MESSAGE:
-                self._handle_group_message(message)
-            elif message.type == MessageType.USER_STATUS_UPDATE:
-                self._handle_status_update(message)
-            elif message.type == MessageType.CONTACT_LIST_RESPONSE:
-                self._handle_contact_list_response(message)
-            elif message.type == MessageType.USER_LIST_RESPONSE:
-                self._handle_user_list_response(message)
-            elif message.type == MessageType.FILE_TRANSFER_REQUEST:
-                self._handle_file_transfer_request(message)
-            elif message.type == MessageType.FILE_TRANSFER_RESPONSE:
-                self._handle_file_transfer_response(message)
-            elif message.type == MessageType.FILE_TRANSFER_DATA:
-                self._handle_file_transfer_data(message)
-            elif message.type == MessageType.FILE_TRANSFER_COMPLETE:
-                self._handle_file_transfer_complete(message)
-            elif message.type == MessageType.DESKTOP_SHARE_REQUEST:
-                self._handle_desktop_share_request(message)
-            elif message.type == MessageType.DESKTOP_SHARE_RESPONSE:
-                self._handle_desktop_share_response(message)
-            elif message.type == MessageType.DESKTOP_FRAME:
-                self._handle_desktop_frame(message)
-            elif message.type == MessageType.DESKTOP_STOP:
-                self._handle_desktop_stop(message)
-            elif message.type == MessageType.ERROR:
-                self._handle_error(message)
-        except Exception as e:
-            logger.error(f"Error handling message: {e}", exc_info=True)
-
-    def _handle_auth_response(self, message: Message):
-        """Handle authentication response."""
-        success = message.payload.get("success", False)
-        if success:
-            self.statusBar().showMessage(f"登录成功: {self._username}")
-        else:
-            error = message.payload.get("error", "认证失败")
-            self.statusBar().showMessage(f"登录失败: {error}")
-
-    def _handle_chat_message(self, message: Message):
-        """Handle incoming chat message."""
-        sender = message.sender
-        content = message.payload.get("content", "")
-        timestamp = message.timestamp
-
-        from datetime import datetime
-        ts = datetime.fromtimestamp(timestamp) if timestamp else datetime.now()
-
-        self.chat_tab.add_message_to_chat(sender, sender, content, ts)
-
-    def _handle_group_message(self, message: Message):
-        """Handle incoming group message."""
-        sender = message.sender
-        target = message.target
-        content = message.payload.get("content", "")
-        timestamp = message.timestamp
-
-        from datetime import datetime
-        ts = datetime.fromtimestamp(timestamp) if timestamp else datetime.now()
-
-        self.chat_tab.add_message_to_chat(target, sender, content, ts)
-
-    def _handle_status_update(self, message: Message):
-        """Handle user status update."""
-        user = message.sender
-        status_str = message.payload.get("status", "offline")
-        try:
-            status = UserStatus(status_str)
-        except ValueError:
-            status = UserStatus.OFFLINE
-        self.contact_list_widget.update_contact_status(user, status)
-
-    def _handle_contact_list_response(self, message: Message):
-        """Handle contact list response."""
-        contacts = message.payload.get("contacts", [])
-        if not isinstance(contacts, list):
-            contacts = []
-        # Normalize: ensure each contact is a dict with "username" and "status"
-        normalized = []
-        for c in contacts:
-            if isinstance(c, dict):
-                normalized.append({
-                    "username": c.get("username", ""),
-                    "status": c.get("status", "offline"),
-                    "last_seen": c.get("last_seen", None)
-                })
-            elif isinstance(c, str):
-                normalized.append({"username": c, "status": "offline", "last_seen": None})
-        self.contact_list_widget.set_contacts(normalized)
-
-    def _handle_user_list_response(self, message: Message):
-        """Handle user list response — updates contact list and widget contact dropdowns."""
-        users = message.payload.get("users", [])
-        if not isinstance(users, list):
-            return
-
-        online_usernames = []
-        for user_data in users:
-            if isinstance(user_data, dict):
-                username = user_data.get("username", "")
-                status_str = user_data.get("status", "offline")
-            elif isinstance(user_data, str):
-                username = user_data
-                status_str = "online"
-            else:
-                continue
+    def _on_tab_changed(self, event):
+        """切换标签页时刷新目标用户下拉。"""
+        selected = None
+        if self._notebook is not None:
             try:
-                status = UserStatus(status_str)
-            except ValueError:
-                status = UserStatus.OFFLINE
-            if username:
-                self.contact_list_widget.update_contact_status(username, status)
-                if status == UserStatus.ONLINE and username != self._username:
-                    online_usernames.append(username)
+                idx = self._notebook.index(self._notebook.select())
+                selected = idx
+            except Exception:
+                selected = None
 
-        # 同步联系人列表到文件传输和桌面共享 widget
-        self.file_transfer_widget.update_contacts(online_usernames)
-        self.remote_desktop_widget.update_contacts(online_usernames)
+        if selected is None:
+            return
+        try:
+            if selected == 1 and self._ft_frame is not None:
+                self._ft_frame.refresh_targets()
+            elif selected == 2 and self._desktop_frame is not None:
+                self._desktop_frame.refresh_targets()
+        except Exception as exc:
+            logger.debug(f"刷新标签页目标失败: {exc}")
 
-    def _handle_error(self, message: Message):
-        """Handle error message."""
-        error = message.payload.get("error", "未知错误")
-        self.statusBar().showMessage(f"错误: {error}")
-        QMessageBox.warning(self, "错误", error)
+    def _get_online_usernames(self) -> List[str]:
+        if self._contact_list is None:
+            return []
+        try:
+            return list(self._contact_list.get_online_contacts())
+        except Exception:
+            return []
 
-    def _on_connected(self):
-        """Handle connected event."""
-        self.connection_indicator.set_status("connected")
-        self.statusBar().showMessage("已连接到服务器")
-        if self._username:
-            self._ws_client.request_contact_list()
+    # =========================================================
+    # WebSocket 信号处理（都保证在 UI 线程）
+    # =========================================================
+
+    def _on_ws_connected(self):
+        self._run_ui(lambda: self._update_status_bar(status_override="已连接"))
+        # 连接成功后主动请求用户列表
+        self._run_ui(self._request_user_list_if_ready)
+
+    def _on_ws_disconnected(self):
+        self._run_ui(lambda: self._update_status_bar(status_override="已断开"))
+
+    def _on_ws_error(self, err: str):
+        self._run_ui(lambda: self._update_status_bar(
+            status_override=f"错误: {err[:40]}"
+        ))
+
+    def _on_ws_reconnecting(self, attempt: int):
+        self._run_ui(lambda: self._update_status_bar(
+            status_override=f"重连中 (第 {attempt} 次)..."
+        ))
+
+    def _on_ws_connection_failed(self, reason: str):
+        self._run_ui(lambda: self._update_status_bar(
+            status_override=f"连接失败: {reason[:40]}"
+        ))
+
+    def _request_user_list_if_ready(self):
+        if self._ws_client is None:
+            return
+        try:
             self._ws_client.request_user_list()
-
-    def _on_disconnected(self):
-        """Handle disconnected event."""
-        self.connection_indicator.set_status("disconnected")
-        self.statusBar().showMessage("已断开连接")
-
-    def _on_reconnecting(self, attempt: int):
-        """Handle reconnecting event."""
-        self.connection_indicator.set_status("reconnecting")
-        self.statusBar().showMessage(f"正在重新连接 (尝试 {attempt})...")
-
-    def _on_connection_failed(self, error: str):
-        """Handle connection failed event."""
-        self.connection_indicator.set_status("disconnected")
-        self.statusBar().showMessage("连接失败")
-        QMessageBox.critical(self, "连接失败", error)
-
-    def _refresh_contacts(self):
-        """Refresh contact list."""
-        if self._ws_client:
+        except Exception:
+            pass
+        try:
             self._ws_client.request_contact_list()
-            self._ws_client.request_user_list()
+        except Exception:
+            pass
 
-    def _toggle_fullscreen(self):
-        """Toggle fullscreen mode."""
-        if self.isFullScreen():
-            self.showNormal()
+    def _on_ws_message(self, msg):
+        """根据消息类型派发到不同子模块。"""
+        try:
+            mtype = getattr(msg, "type", None)
+            if mtype is None:
+                return
+
+            # 消息类型可能是 MessageType 枚举或字符串
+            type_value = mtype.value if isinstance(mtype, MessageType) else mtype
+
+            handlers = {
+                # 聊天
+                MessageType.CHAT_MESSAGE.value: self._handle_chat_message,
+
+                # 文件传输
+                MessageType.FILE_TRANSFER_REQUEST.value:
+                    self._handle_ft_request,
+                MessageType.FILE_TRANSFER_RESPONSE.value:
+                    self._handle_ft_response,
+                MessageType.FILE_TRANSFER_DATA.value:
+                    self._handle_ft_data,
+                MessageType.FILE_TRANSFER_COMPLETE.value:
+                    self._handle_ft_complete,
+
+                # 远程桌面
+                MessageType.DESKTOP_SHARE_REQUEST.value:
+                    self._handle_desktop_request,
+                MessageType.DESKTOP_SHARE_RESPONSE.value:
+                    self._handle_desktop_response,
+                MessageType.DESKTOP_FRAME.value:
+                    self._handle_desktop_frame,
+                MessageType.DESKTOP_STOP.value:
+                    self._handle_desktop_stop,
+
+                # 用户列表
+                MessageType.USER_LIST_RESPONSE.value:
+                    self._handle_user_list,
+                MessageType.CONTACT_LIST_RESPONSE.value:
+                    self._handle_contact_list,
+
+                # 用户状态变化
+                MessageType.USER_STATUS_UPDATE.value:
+                    self._handle_user_status_update,
+            }
+
+            handler = handlers.get(type_value)
+            if handler is not None:
+                self._run_ui(lambda m=msg, h=handler: self._safe_call(h, m))
+            else:
+                logger.debug(f"未处理的消息类型: {type_value}")
+        except Exception as exc:
+            logger.debug(f"消息处理异常: {exc}")
+
+    # ----------- 聊天 -----------
+
+    def _handle_chat_message(self, msg: Message):
+        sender = getattr(msg, "sender", "")
+        payload = getattr(msg, "payload", None) or {}
+        content = payload.get("content", "") if isinstance(payload, dict) else ""
+        if not content:
+            # 兼容：Message 的上层字段
+            content = getattr(msg, "content", "")
+        if self._chat_tabs is not None and sender:
+            # 来自对方的消息：显示在与 sender 的会话中
+            target_for_ui = sender
+            self._chat_tabs.add_message_to_chat(
+                target_for_ui, sender, str(content), datetime.now()
+            )
+
+    # ----------- 文件传输 -----------
+
+    def _handle_ft_request(self, msg: Message):
+        self._ft_manager.handle_incoming_request(msg)
+
+    def _handle_ft_response(self, msg: Message):
+        self._ft_manager.handle_response(msg)
+
+    def _handle_ft_data(self, msg: Message):
+        self._ft_manager.handle_incoming_data(msg)
+
+    def _handle_ft_complete(self, msg: Message):
+        self._ft_manager.handle_incoming_complete(msg)
+
+    # ----------- 远程桌面 -----------
+
+    def _handle_desktop_request(self, msg: Message):
+        sender = getattr(msg, "sender", "")
+        if not sender or self._desktop_frame is None:
+            return
+        payload = getattr(msg, "payload", None) or {}
+        share_type = payload.get("share_type", "view") if isinstance(payload, dict) else "view"
+
+        def _accept():
+            if self._ws_client is not None:
+                try:
+                    self._ws_client.send_desktop_share_response(sender, True, share_type)
+                except Exception:
+                    pass
+            # 如果我有 Pillow，则开始共享我的屏幕给对方
+            if self._desktop_frame is not None:
+                self._desktop_frame.start_capture_loop(sender)
+            self._switch_to_desktop_tab()
+
+        def _reject():
+            if self._ws_client is not None:
+                try:
+                    self._ws_client.send_desktop_share_response(sender, False, share_type)
+                except Exception:
+                    pass
+            if self._desktop_frame is not None:
+                self._desktop_frame.set_status("已拒绝")
+
+        self._desktop_frame.show_incoming_request(sender, _accept, _reject)
+
+    def _handle_desktop_response(self, msg: Message):
+        payload = getattr(msg, "payload", None) or {}
+        accepted = (payload.get("accepted") if isinstance(payload, dict) else None) or \
+                   getattr(msg, "accepted", False)
+        sender = getattr(msg, "sender", "")
+        if accepted and sender and self._desktop_frame is not None:
+            # 对方接受了我的请求 → 如果我是请求看对方屏幕，等对方发帧
+            self._desktop_frame.set_status(f"已连接到 {sender}，等待画面...")
+            self._switch_to_desktop_tab()
         else:
-            self.showFullScreen()
+            if self._desktop_frame is not None:
+                self._desktop_frame.set_status(f"{sender} 拒绝了请求")
 
-    def _on_logout(self):
-        """Handle logout."""
-        reply = QMessageBox.question(
-            self,
-            "退出登录",
-            "确定要退出登录吗?",
-            QMessageBox.Yes | QMessageBox.No
-        )
+    def _handle_desktop_frame(self, msg: Message):
+        payload = getattr(msg, "payload", None) or {}
+        if not isinstance(payload, dict):
+            return
+        image_data = payload.get("image_data", "")
+        width = int(payload.get("width", 0) or 0)
+        height = int(payload.get("height", 0) or 0)
+        if image_data and self._desktop_frame is not None:
+            self._desktop_frame.display_frame(image_data, width, height)
 
-        if reply == QMessageBox.Yes:
-            if self._ws_client:
-                self._ws_client.send_logout()
-            self.logout_requested.emit()
+    def _handle_desktop_stop(self, msg: Message):
+        sender = getattr(msg, "sender", "")
+        if self._desktop_frame is not None:
+            self._desktop_frame.set_status(f"{sender} 停止了共享")
+            # 停止本地侧捕获循环
+            self._desktop_frame._stop_capture_loop()
 
-    def _on_about(self):
-        """Show about dialog."""
-        QMessageBox.about(
-            self,
-            "关于",
-            "在线协作套件 v1.0\n\n"
-            "提供即时通讯、文件传输和远程桌面功能。"
-        )
+    def _switch_to_desktop_tab(self):
+        if self._notebook is None:
+            return
+        try:
+            self._notebook.select(2)
+        except Exception:
+            pass
 
-    def closeEvent(self, event: QCloseEvent):
-        """Handle window close event."""
-        if self._ws_client:
-            self._ws_client.stop()
-        self.chat_tab.close_all_chats()
-        event.accept()
+    # ----------- 用户列表 / 状态 -----------
 
+    def _handle_user_list(self, msg: Message):
+        payload = getattr(msg, "payload", None) or {}
+        users = payload.get("users") if isinstance(payload, dict) else None
+        if users is None:
+            users = getattr(msg, "users", []) or []
+        if self._contact_list is not None and isinstance(users, list):
+            contacts = []
+            for u in users:
+                if isinstance(u, dict):
+                    contacts.append({
+                        "username": u.get("username", u.get("name", "")),
+                        "status": u.get("status", "online"),
+                    })
+                elif isinstance(u, str):
+                    contacts.append({"username": u, "status": "online"})
+            self._contact_list.set_contacts(contacts)
+
+    def _handle_contact_list(self, msg: Message):
+        payload = getattr(msg, "payload", None) or {}
+        users = payload.get("contacts") if isinstance(payload, dict) else None
+        if users is None:
+            users = payload.get("users") if isinstance(payload, dict) else None
+        if users is None:
+            users = getattr(msg, "contacts", []) or getattr(msg, "users", []) or []
+        if self._contact_list is not None and isinstance(users, list):
+            contacts = []
+            for u in users:
+                if isinstance(u, dict):
+                    contacts.append({
+                        "username": u.get("username", u.get("name", "")),
+                        "status": u.get("status", "online"),
+                    })
+                elif isinstance(u, str):
+                    contacts.append({"username": u, "status": "online"})
+            self._contact_list.set_contacts(contacts)
+
+    def _handle_user_status_update(self, msg: Message):
+        payload = getattr(msg, "payload", None) or {}
+        if isinstance(payload, dict):
+            username = payload.get("username") or getattr(msg, "sender", "")
+            status = payload.get("status", "online")
+        else:
+            username = getattr(msg, "sender", "")
+            status = getattr(msg, "status", "online")
+        if self._contact_list is not None and username:
+            self._contact_list.update_contact_status(username, status)
+
+    # =========================================================
+    # 辅助
+    # =========================================================
+
+    def _safe_call(self, fn, *args, **kwargs):
+        try:
+            fn(*args, **kwargs)
+        except Exception as exc:
+            logger.debug(f"UI 回调异常: {exc}")
+
+    def _update_status_bar(self, status_override: Optional[str] = None):
+        if self._status_text is None:
+            return
+        if status_override:
+            state = status_override
+        else:
+            try:
+                connected = (self._ws_client is not None and
+                             getattr(self._ws_client, "is_connected", False))
+                if connected and hasattr(self._ws_client, "host") and hasattr(self._ws_client, "port"):
+                    state = f"已连接到 {self._ws_client.host}:{self._ws_client.port}"
+                elif connected:
+                    state = "已连接"
+                else:
+                    state = "未连接"
+            except Exception:
+                state = "未连接"
+
+        user = self._username or "未登录"
+        self._status_text.set(f"{state}  ({user})")
+
+    def _run_ui(self, fn):
+        """把 UI 操作调度到 Tk 主线程。"""
+        try:
+            root = self.winfo_toplevel()
+            if root is not None and hasattr(root, "after"):
+                try:
+                    root.after(0, fn)
+                    return
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        # 回退：直接调用
+        try:
+            fn()
+        except Exception as exc:
+            logger.debug(f"UI 操作异常: {exc}")
+
+
+__all__ = ["MainWindow", "FileTransferFrame", "DesktopFrame"]
