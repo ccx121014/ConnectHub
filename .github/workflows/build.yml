@@ -85,16 +85,29 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ github.ref_name }}"
-          $files = @()
-          Compress-Archive -Path "dist\ConnectHub-Client\*" -DestinationPath "ConnectHub-Client.zip"
-          Compress-Archive -Path "dist\ConnectHub-Server\*" -DestinationPath "ConnectHub-Server.zip"
+          Write-Host "Tag is $tag"
+
+          Write-Host "Listing working directory"
+          Get-ChildItem -Force | Format-Table Name, Length
+
+          Compress-Archive -Path "dist\ConnectHub-Client\*" -DestinationPath "ConnectHub-Client.zip" -Force
+          Compress-Archive -Path "dist\ConnectHub-Server\*" -DestinationPath "ConnectHub-Server.zip" -Force
+
+          Write-Host "After zip"
+          Get-ChildItem *.zip, *.exe | Format-Table Name, Length
+
+          $fileArgs = @()
           if (Test-Path "ConnectHub-Setup.exe") {
-            $files += 'ConnectHub-Setup.exe#ConnectHub Installer - double click to install'
+            $fileArgs += 'ConnectHub-Setup.exe#ConnectHub Installer - double click to install'
           }
-          $files += 'ConnectHub-Client.zip#ConnectHub Client - unzip and run'
-          $files += 'ConnectHub-Server.zip#ConnectHub Server - unzip and run'
-          $notes = "ConnectHub " + $tag
-          gh release create $tag --title ("ConnectHub " + $tag) --notes $notes @files
+          $fileArgs += 'ConnectHub-Client.zip#ConnectHub Client - unzip and run'
+          $fileArgs += 'ConnectHub-Server.zip#ConnectHub Server - unzip and run'
+
+          $notes = "ConnectHub release"
+          Write-Host "Running gh release create $tag with $($fileArgs.Count) files"
+          Write-Host "Files: $($fileArgs -join ', ')"
+          & gh release create $tag @fileArgs --title "ConnectHub $tag" --notes $notes
+          Write-Host "gh exit code $LASTEXITCODE"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
