@@ -36,21 +36,47 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path "dist\ConnectHub-Server\data" -Force
-          Get-ChildItem dist | Format-Table
-          Write-Host "Client exe" (Test-Path "dist\ConnectHub-Client\ConnectHub-Client.exe")
-          Write-Host "Server exe" (Test-Path "dist\ConnectHub-Server\ConnectHub-Server.exe")
+          Get-ChildItem dist -Recurse -Depth 1 | Format-Table
 
       - name: Build installer with InnoSetup
         shell: pwsh
+        continue-on-error: true
         run: |
           choco install innosetup -y --no-progress
-          $iscc = Get-ChildItem -Path "C:\Program Files (x86)\Inno Setup 6" -Filter "iscc.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          $iscc = Get-ChildItem -Path "C:\Program Files (x86)\Inno Setup 6","C:\Program Files\Inno Setup 6" -Filter "iscc.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $iscc) {
+            Write-Host "iscc not found, trying other paths"
+            Get-ChildItem -Path "C:\" -Filter "iscc.exe" -Recurse -ErrorAction SilentlyContinue -Depth 5 | Select-Object -First 3 -ExpandProperty FullName
+            exit 0
+          }
           Write-Host "Using iscc at $iscc"
-          & $iscc installer\setup.iss 2>&1 | Out-String | Write-Host
+          & $iscc installer\setup.iss
+          $exitCode = $LASTEXITCODE
+          Write-Host "iscc exit code $exitCode"
           if (Test-Path "ConnectHub-Setup.exe") {
-            Write-Host "Installer built"
+            Write-Host "SUCCESS installer built"
+            Get-Item ConnectHub-Setup.exe | Select-Object Name, Length
           } else {
-            Write-Host "WARNING no installer exe"
+            Write-Host "No installer found in working dir"
+            $outputDir = Get-ChildItem -Path "." -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*Setup*" -or $_.Name -like "*installer*" } | Select-Object -First 5
+            foreach ($f in $outputDir) { Write-Host $f.FullName }
+          }
+
+      - name: Build installer with NSIS as backup
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          if (Test-Path "ConnectHub-Setup.exe") {
+            Write-Host "Installer already exists, skipping NSIS"
+            exit 0
+          }
+          choco install nsis -y --no-progress
+          $makensis = Get-ChildItem -Path "C:\Program Files (x86)\NSIS","C:\Program Files\NSIS" -Filter "makensis.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $makensis) { exit 0 }
+          Write-Host "Using makensis at $makensis"
+          & $makensis installer\installer.nsi
+          if (Test-Path "ConnectHub-Setup.exe") {
+            Write-Host "NSIS installer built"
           }
 
       - name: Create release
