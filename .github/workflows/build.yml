@@ -28,11 +28,11 @@ jobs:
 
       - name: Build Client
         shell: pwsh
-        run: pyinstaller --noconfirm --clean client/app.py --name ConnectHub-Client --windowed --add-data "protocol;protocol" --add-data "version.json;." --add-data "client/config.json;." --hidden-import websockets --hidden-import PyQt5.QtCore --hidden-import PyQt5.QtGui --hidden-import PyQt5.QtWidgets
+        run: pyinstaller --noconfirm --clean client/app.py --name ConnectHub-Client --windowed --paths . --paths client --add-data "protocol;protocol" --add-data "version.json;." --add-data "client/config.json;." --hidden-import websockets --hidden-import websocket_client --hidden-import main_window --hidden-import chat_widget --hidden-import contact_list --hidden-import file_transfer --hidden-import login_dialog --hidden-import updater --hidden-import protocol.messages --hidden-import protocol --hidden-import PyQt5.QtCore --hidden-import PyQt5.QtGui --hidden-import PyQt5.QtWidgets --hidden-import PyQt5.QtNetwork
 
       - name: Build Server
         shell: pwsh
-        run: pyinstaller --noconfirm --clean server/main.py --name ConnectHub-Server --console --add-data "protocol;protocol" --add-data "version.json;." --add-data "server/config.json;." --hidden-import websockets
+        run: pyinstaller --noconfirm --clean server/main.py --name ConnectHub-Server --console --paths . --paths server --add-data "protocol;protocol" --add-data "version.json;." --add-data "server/config.json;." --hidden-import websockets --hidden-import user_manager --hidden-import chat_history --hidden-import webrtc_signaling --hidden-import protocol --hidden-import protocol.messages
 
       - name: Verify build output
         shell: pwsh
