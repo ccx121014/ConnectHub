@@ -11,7 +11,6 @@ WizardStyle=modern
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
-DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\client\ConnectHub-Client.exe
 
 [Languages]
@@ -22,10 +21,8 @@ Source: "..\dist\ConnectHub-Client\*"; DestDir: "{app}\client"; Flags: recursesu
 Source: "..\dist\ConnectHub-Server\*"; DestDir: "{app}\server"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{group}\ConnectHub"; Filename: "{app}\client\ConnectHub-Client.exe"
+Name: "{group}\ConnectHub Client"; Filename: "{app}\client\ConnectHub-Client.exe"
 Name: "{group}\ConnectHub Server"; Filename: "{app}\server\ConnectHub-Server.exe"
 Name: "{group}\Uninstall ConnectHub"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\ConnectHub"; Filename: "{app}\client\ConnectHub-Client.exe"
-
-[Run]
-Filename: "{app}\client\ConnectHub-Client.exe"; Description: "Launch ConnectHub"; Flags: nowait postinstall skipifsilent
+Name: "{userdesktop}\ConnectHub Client"; Filename: "{app}\client\ConnectHub-Client.exe"
+Name: "{userdesktop}\ConnectHub Server"; Filename: "{app}\server\ConnectHub-Server.exe"
