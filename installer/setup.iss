@@ -4,6 +4,7 @@ AppVersion=1.0.6
 DefaultDirName={pf}\ConnectHub
 DefaultGroupName=ConnectHub
 OutputBaseFilename=ConnectHub-Setup
+OutputDir=..
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -20,8 +21,8 @@ Source: "dist\ConnectHub-Server\*"; DestDir: "{app}\server"; Flags: recursesubdi
 Name: "{group}\ConnectHub"; Filename: "{app}\client\ConnectHub-Client.exe"
 Name: "{group}\ConnectHub Server"; Filename: "{app}\server\ConnectHub-Server.exe"
 Name: "{group}\Uninstall ConnectHub"; Filename: "{uninstallexe}"
-Name: "{desktop}\ConnectHub"; Filename: "{app}\client\ConnectHub-Client.exe"
-Name: "{desktop}\ConnectHub Server"; Filename: "{app}\server\ConnectHub-Server.exe"
+Name: "{userdesktop}\ConnectHub"; Filename: "{app}\client\ConnectHub-Client.exe"
+Name: "{userdesktop}\ConnectHub Server"; Filename: "{app}\server\ConnectHub-Server.exe"
 
 [Run]
 Filename: "{app}\client\ConnectHub-Client.exe"; Description: "Launch ConnectHub"; Flags: nowait postinstall skipifsilent

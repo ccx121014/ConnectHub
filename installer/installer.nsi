@@ -8,10 +8,10 @@ ShowUnInstDetails show
 
 Section "ConnectHub" SecMain
   SetOutPath "$INSTDIR\client"
-  File /r "dist\ConnectHub-Client\*.*"
+  File /r "dist\ConnectHub-Client\*"
 
   SetOutPath "$INSTDIR\server"
-  File /r "dist\ConnectHub-Server\*.*"
+  File /r "dist\ConnectHub-Server\*"
 
   SetOutPath "$INSTDIR"
   CreateDirectory "$SMPROGRAMS\ConnectHub"
