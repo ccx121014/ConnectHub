@@ -9,6 +9,7 @@ on:
 jobs:
   build-windows:
     runs-on: windows-latest
+    timeout-minutes: 60
 
     steps:
     - name: Checkout code
@@ -25,53 +26,47 @@ jobs:
         pip install PyQt5 websockets pyinstaller
 
     - name: Build Client (PyInstaller)
-      run: |
-        pyinstaller --noconfirm --clean client/app.py --name ConnectHub-Client --windowed --add-data "protocol;protocol" --add-data "version.json;." --add-data "client/config.json;." --hidden-import websockets --hidden-import PyQt5.QtCore --hidden-import PyQt5.QtGui --hidden-import PyQt5.QtWidgets
+      run: pyinstaller --noconfirm --clean client/app.py --name ConnectHub-Client --windowed --add-data "protocol;protocol" --add-data "version.json;." --add-data "client/config.json;." --hidden-import websockets --hidden-import PyQt5.QtCore --hidden-import PyQt5.QtGui --hidden-import PyQt5.QtWidgets
 
     - name: Build Server (PyInstaller)
-      run: |
-        pyinstaller --noconfirm --clean server/main.py --name ConnectHub-Server --console --add-data "protocol;protocol" --add-data "version.json;." --add-data "server/config.json;." --hidden-import websockets
+      run: pyinstaller --noconfirm --clean server/main.py --name ConnectHub-Server --console --add-data "protocol;protocol" --add-data "version.json;." --add-data "server/config.json;." --hidden-import websockets
 
     - name: Create server data directory
       run: mkdir dist\ConnectHub-Server\data
 
+    - name: List build output
+      run: |
+        dir dist\ConnectHub-Client
+        dir dist\ConnectHub-Server
+
     - name: Install NSIS
-      run: choco install nsis.portable -y --no-progress
+      run: choco install nsis -y --no-progress
 
     - name: Build Setup (NSIS installer)
       run: makensis installer\installer.nsi
 
     - name: Verify installer
+      run: dir ConnectHub-Setup.exe
+
+    - name: Create Release and upload installer
+      shell: pwsh
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        dir ConnectHub-Setup.exe
-        dir dist\ConnectHub-Client\ConnectHub-Client.exe
-        dir dist\ConnectHub-Server\ConnectHub-Server.exe
+        $tag = "${{ github.ref_name }}"
+        $body = "ConnectHub $tag`n`n下载 `ConnectHub-Setup.exe` 后双击即可安装。`n`n- 客户端: 聊天 / 文件传输 / 远程桌面`n- 服务器: 只需在一台电脑上运行"
+        gh release create $tag --title "ConnectHub $tag" --notes $body 'ConnectHub-Setup.exe#ConnectHub 安装包 (双击安装)'
 
-    - name: Delete old release
-      run: gh release delete "${{ github.ref_name }}" -y 2>&1 | Out-Null; $LASTEXITCODE = 0
+    - name: Upload additional archives (client zip + server zip)
+      shell: pwsh
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      continue-on-error: true
-
-    - name: Create Release
-      run: gh release create "${{ github.ref_name }}" --title "ConnectHub ${{ github.ref_name }}" --notes "ConnectHub ${{ github.ref_name }}: 即时聊天、文件传输、远程桌面。下载 ConnectHub-Setup.exe 双击安装即可。"
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Upload installer to Release
-      run: gh release upload "${{ github.ref_name }}" "ConnectHub-Setup.exe" --clobber
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Upload additional artifacts (client zip + server zip)
       run: |
         Compress-Archive -Path "dist\ConnectHub-Client\*" -DestinationPath "ConnectHub-Client.zip"
         Compress-Archive -Path "dist\ConnectHub-Server\*" -DestinationPath "ConnectHub-Server.zip"
-        gh release upload "${{ github.ref_name }}" "ConnectHub-Client.zip" "ConnectHub-Server.zip" --clobber
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        gh release upload "${{ github.ref_name }}" "ConnectHub-Client.zip#ConnectHub 客户端 (免安装版)" "ConnectHub-Server.zip#ConnectHub 服务器 (免安装版)"
 
-    - name: Upload build artifacts (for debugging)
+    - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ConnectHub-Setup

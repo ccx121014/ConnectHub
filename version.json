@@ -1,8 +1,8 @@
 {
-  "version": "1.0.5",
+  "version": "1.0.6",
   "release_date": "2026-06-21",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.0.5/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.0.5/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.0.5/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.0.5 - 支持标准 NSIS 安装包，完全双击即用"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.0.6/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.0.6/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.0.6/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.0.6 — 标准 NSIS 安装包，支持双击安装与一键卸载"
 }
