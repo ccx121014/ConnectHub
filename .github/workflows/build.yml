@@ -20,20 +20,24 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.13'
 
       - name: Install Python dependencies
         shell: pwsh
         run: |
           pip install --upgrade pip PyQt5 websockets pyinstaller
-          # 安装 UPX 压缩工具（可显著减小体积）
-          $upxVersion = "4.2.4"
-          Invoke-WebRequest -Uri "https://github.com/upx/upx/releases/download/v$upxVersion/upx-$upxVersion-win64.zip" -OutFile "upx.zip"
-          Expand-Archive -Path "upx.zip" -DestinationPath "."
-          Move-Item -Path "upx-$upxVersion-win64\upx.exe" -Destination "."
-          Write-Host "UPX installed"
+          # 删除 PyQt5 多语言文件（每个 locale ~1MB，共 50+ 个语言包）
+          $pyPath = "$env:USERPROFILE\AppData\Local\Programs\Python\Python313"
+          Remove-Item -Recurse -Force "$pyPath\Lib\site-packages\PyQt5\Qt5\translations" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$pyPath\Lib\site-packages\PyQt5\Qt5\qml" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$pyPath\Lib\site-packages\PyQt5\Qt5\doc" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$pyPath\Lib\site-packages\PyQt5\Qt5\examples" -ErrorAction SilentlyContinue
+          # 清理 Python 标准库不需要的部分
+          Remove-Item -Recurse -Force "$pyPath\Lib\test" -ErrorAction SilentlyContinue
+          Remove-Item -Recurse -Force "$pyPath\Lib\idlelib" -ErrorAction SilentlyContinue
+          Write-Host "Cleanup done, Python 3.13 + trimmed PyQt5 ready"
 
-      - name: Build Client (体积优化版)
+      - name: Build Client (超轻量版)
         shell: pwsh
         run: |
           pyinstaller --noconfirm --clean `
@@ -73,7 +77,7 @@ jobs:
             client/app.py
           Get-Item dist\ConnectHub-Client.exe | Select-Object Name, @{Name='SizeMB';Expression={[math]::Round($_.Length/1MB,2)}}
 
-      - name: Build Server (体积优化版)
+      - name: Build Server (超轻量版)
         shell: pwsh
         run: |
           pyinstaller --noconfirm --clean `
