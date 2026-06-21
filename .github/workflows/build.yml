@@ -34,18 +34,38 @@ jobs:
     - name: Create server data directory
       run: mkdir dist\ConnectHub-Server\data
 
-    - name: List build output
-      run: dir dist
-
-    - name: Install NSIS
-      run: choco install nsis -y --no-progress
-
-    - name: Verify NSIS
-      run: makensis /VERSION
+    - name: Find and install NSIS
+      shell: pwsh
+      run: |
+        # Try common paths first
+        $paths = @(
+          "C:\Program Files (x86)\NSIS\makensis.exe",
+          "C:\Program Files\NSIS\makensis.exe",
+          "C:\ProgramData\chocolatey\bin\makensis.exe"
+        )
+        foreach ($p in $paths) {
+          if (Test-Path $p) {
+            Write-Host "Found NSIS at: $p"
+            exit 0
+          }
+        }
+        # If not found, install via choco
+        Write-Host "NSIS not found, installing via choco..."
+        choco install nsis -y --no-progress 2>&1 | Out-Null
+        # Update path
+        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+        if (Get-Command makensis -ErrorAction SilentlyContinue) {
+          Write-Host "NSIS installed successfully"
+        } else {
+          Write-Host "NSIS still not found - will try portable version"
+          choco install nsis.portable -y --no-progress 2>&1 | Out-Null
+        }
 
     - name: Build Setup (NSIS installer)
-      run: makensis installer\installer.nsi
-      working-directory: ${{ github.workspace }}
+      shell: cmd
+      run: |
+        set PATH=%PATH%;C:\Program Files (x86)\NSIS;C:\Program Files\NSIS
+        makensis installer\installer.nsi
 
     - name: Verify installer
       run: dir ConnectHub-Setup.exe
@@ -56,11 +76,8 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         $tag = "${{ github.ref_name }}"
-        $notes = "ConnectHub " + $tag + "`n`n下载 ConnectHub-Setup.exe 后双击即可安装。`n`n- 客户端: 聊天 / 文件传输 / 远程桌面`n- 服务器: 只需在一台电脑上运行"
-        & gh release create $tag --title ("ConnectHub " + $tag) --notes $notes --repo "${{ github.repository }}" 'ConnectHub-Setup.exe#ConnectHub 安装包 (双击安装)'
-        if ($LASTEXITCODE -ne 0) {
-          Write-Host "Release creation failed with exit code $LASTEXITCODE - trying with GitHub API"
-        }
+        $notes = "ConnectHub " + $tag + "`n`nDownload ConnectHub-Setup.exe and double-click to install.`n`n- Client: Chat / File transfer / Remote desktop`n- Server: Run on one computer only"
+        gh release create $tag --title ("ConnectHub " + $tag) --notes $notes 'ConnectHub-Setup.exe#ConnectHub Installer (double-click to install)'
 
     - name: Upload additional archives (client zip + server zip)
       shell: pwsh
@@ -69,7 +86,7 @@ jobs:
       run: |
         Compress-Archive -Path "dist\ConnectHub-Client\*" -DestinationPath "ConnectHub-Client.zip"
         Compress-Archive -Path "dist\ConnectHub-Server\*" -DestinationPath "ConnectHub-Server.zip"
-        & gh release upload "${{ github.ref_name }}" "ConnectHub-Client.zip#ConnectHub 客户端 (免安装版)" "ConnectHub-Server.zip#ConnectHub 服务器 (免安装版)" --repo "${{ github.repository }}"
+        gh release upload "${{ github.ref_name }}" "ConnectHub-Client.zip#ConnectHub Client (portable)" "ConnectHub-Server.zip#ConnectHub Server (portable)"
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
