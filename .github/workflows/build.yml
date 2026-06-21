@@ -31,55 +31,39 @@ jobs:
     - name: Build Server (PyInstaller)
       run: pyinstaller --noconfirm --clean server/main.py --name ConnectHub-Server --console --add-data "protocol;protocol" --add-data "version.json;." --add-data "server/config.json;." --hidden-import websockets
 
-    - name: Create server data directory
-      run: mkdir dist\ConnectHub-Server\data
+    - name: Create data directory
+      run: if not exist dist\ConnectHub-Server\data mkdir dist\ConnectHub-Server\data
 
-    - name: Find and install NSIS
-      shell: pwsh
+    - name: Install NSIS via Chocolatey
+      run: choco install nsis -y --no-progress
+
+    - name: Build NSIS installer
       run: |
-        # Try common paths first
-        $paths = @(
-          "C:\Program Files (x86)\NSIS\makensis.exe",
-          "C:\Program Files\NSIS\makensis.exe",
-          "C:\ProgramData\chocolatey\bin\makensis.exe"
-        )
-        foreach ($p in $paths) {
-          if (Test-Path $p) {
-            Write-Host "Found NSIS at: $p"
-            exit 0
-          }
-        }
-        # If not found, install via choco
-        Write-Host "NSIS not found, installing via choco..."
-        choco install nsis -y --no-progress 2>&1 | Out-Null
-        # Update path
-        $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
-        if (Get-Command makensis -ErrorAction SilentlyContinue) {
-          Write-Host "NSIS installed successfully"
+        $nsisPath = (Get-ChildItem -Path "C:\Program Files (x86)\NSIS","C:\Program Files\NSIS","C:\ProgramData\chocolatey\bin" -Filter "makensis.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+        if (-not $nsisPath) { $nsisPath = "C:\Program Files (x86)\NSIS\makensis.exe" }
+        Write-Host "Using NSIS at: $nsisPath"
+        & $nsisPath installer\installer.nsi
+
+    - name: Check installer
+      run: |
+        if (Test-Path "ConnectHub-Setup.exe") {
+          Write-Host "Installer created successfully"
+          Get-Item ConnectHub-Setup.exe | Format-List
         } else {
-          Write-Host "NSIS still not found - will try portable version"
-          choco install nsis.portable -y --no-progress 2>&1 | Out-Null
+          Write-Host "Installer NOT found"
+          exit 1
         }
 
-    - name: Build Setup (NSIS installer)
-      shell: cmd
-      run: |
-        set PATH=%PATH%;C:\Program Files (x86)\NSIS;C:\Program Files\NSIS
-        makensis installer\installer.nsi
-
-    - name: Verify installer
-      run: dir ConnectHub-Setup.exe
-
-    - name: Create Release and upload installer
+    - name: Create Release
       shell: pwsh
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         $tag = "${{ github.ref_name }}"
-        $notes = "ConnectHub " + $tag + "`n`nDownload ConnectHub-Setup.exe and double-click to install.`n`n- Client: Chat / File transfer / Remote desktop`n- Server: Run on one computer only"
-        gh release create $tag --title ("ConnectHub " + $tag) --notes $notes 'ConnectHub-Setup.exe#ConnectHub Installer (double-click to install)'
+        $notes = "ConnectHub " + $tag + "`n`nDownload ConnectHub-Setup.exe and double-click to install."
+        gh release create $tag --title ("ConnectHub " + $tag) --notes $notes 'ConnectHub-Setup.exe#ConnectHub Installer'
 
-    - name: Upload additional archives (client zip + server zip)
+    - name: Upload additional archives
       shell: pwsh
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
