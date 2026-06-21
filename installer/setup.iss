@@ -1,28 +1,29 @@
 [Setup]
 AppName=ConnectHub
-AppVersion=1.0.6
+AppVersion=1.0.7
 DefaultDirName={pf}\ConnectHub
 DefaultGroupName=ConnectHub
 OutputBaseFilename=ConnectHub-Setup
 OutputDir=..
-Compression=lzma2
+Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
-UninstallDisplayIcon={app}\client\ConnectHub-Client.exe
+UninstallDisplayIcon={app}\ConnectHub-Client.exe
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
-Source: "..\dist\ConnectHub-Client\*"; DestDir: "{app}\client"; Flags: recursesubdirs createallsubdirs ignoreversion
-Source: "..\dist\ConnectHub-Server\*"; DestDir: "{app}\server"; Flags: recursesubdirs createallsubdirs ignoreversion
+; --onefile 后是单个 exe 文件
+Source: "..\dist\ConnectHub-Client.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\ConnectHub-Server.exe"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\ConnectHub Client"; Filename: "{app}\client\ConnectHub-Client.exe"
-Name: "{group}\ConnectHub Server"; Filename: "{app}\server\ConnectHub-Server.exe"
-Name: "{group}\Uninstall ConnectHub"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\ConnectHub Client"; Filename: "{app}\client\ConnectHub-Client.exe"
-Name: "{userdesktop}\ConnectHub Server"; Filename: "{app}\server\ConnectHub-Server.exe"
+Name: "{group}\ConnectHub 客户端"; Filename: "{app}\ConnectHub-Client.exe"
+Name: "{group}\ConnectHub 服务端"; Filename: "{app}\ConnectHub-Server.exe"
+Name: "{group}\卸载 ConnectHub"; Filename: "{uninstallexe}"
+Name: "{userdesktop}\ConnectHub 客户端"; Filename: "{app}\ConnectHub-Client.exe"
+Name: "{userdesktop}\ConnectHub 服务端"; Filename: "{app}\ConnectHub-Server.exe"

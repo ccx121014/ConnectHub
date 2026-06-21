@@ -24,21 +24,83 @@ jobs:
 
       - name: Install Python dependencies
         shell: pwsh
-        run: pip install --upgrade pip PyQt5 websockets pyinstaller
+        run: |
+          pip install --upgrade pip PyQt5 websockets pyinstaller
+          # 安装 UPX 压缩工具（可显著减小体积）
+          $upxVersion = "4.2.4"
+          Invoke-WebRequest -Uri "https://github.com/upx/upx/releases/download/v$upxVersion/upx-$upxVersion-win64.zip" -OutFile "upx.zip"
+          Expand-Archive -Path "upx.zip" -DestinationPath "."
+          Move-Item -Path "upx-$upxVersion-win64\upx.exe" -Destination "."
+          Write-Host "UPX installed"
 
-      - name: Build Client
+      - name: Build Client (体积优化版)
         shell: pwsh
-        run: pyinstaller --noconfirm --clean client/app.py --name ConnectHub-Client --windowed --paths . --paths client --add-data "protocol;protocol" --add-data "version.json;." --add-data "client/config.json;." --hidden-import websockets --hidden-import websocket_client --hidden-import main_window --hidden-import chat_widget --hidden-import contact_list --hidden-import file_transfer --hidden-import login_dialog --hidden-import updater --hidden-import protocol.messages --hidden-import protocol --hidden-import PyQt5.QtCore --hidden-import PyQt5.QtGui --hidden-import PyQt5.QtWidgets --hidden-import PyQt5.QtNetwork
+        run: |
+          pyinstaller --noconfirm --clean `
+            --onefile --windowed --strip `
+            --paths . --paths client `
+            --add-data "protocol;protocol" `
+            --add-data "version.json;." `
+            --add-data "client/config.json;." `
+            --hidden-import websockets --hidden-import websocket_client `
+            --hidden-import main_window --hidden-import chat_widget `
+            --hidden-import contact_list --hidden-import file_transfer `
+            --hidden-import login_dialog --hidden-import updater `
+            --hidden-import protocol.messages --hidden-import protocol `
+            --hidden-import PyQt5.QtCore --hidden-import PyQt5.QtGui `
+            --hidden-import PyQt5.QtWidgets --hidden-import PyQt5.QtNetwork `
+            --exclude-module PyQt5.QtWebEngineCore --exclude-module PyQt5.QtWebEngineWidgets `
+            --exclude-module PyQt5.QtWebEngine --exclude-module PyQt5.QtWebKit `
+            --exclude-module PyQt5.QtWebKitWidgets --exclude-module PyQt5.QtMultimedia `
+            --exclude-module PyQt5.QtMultimediaWidgets --exclude-module PyQt5.QtQuick `
+            --exclude-module PyQt5.QtQuickWidgets --exclude-module PyQt5.QtQml `
+            --exclude-module PyQt5.Qt3DCore --exclude-module PyQt5.Qt3DRender `
+            --exclude-module PyQt5.Qt3DAnimation --exclude-module PyQt5.Qt3DInput `
+            --exclude-module PyQt5.Qt3DLogic --exclude-module PyQt5.Qt3DExtras `
+            --exclude-module PyQt5.QtSql --exclude-module PyQt5.QtXml `
+            --exclude-module PyQt5.QtXmlPatterns --exclude-module PyQt5.QtSvg `
+            --exclude-module PyQt5.QtSvgWidgets --exclude-module PyQt5.QtTest `
+            --exclude-module PyQt5.QtPrintSupport --exclude-module PyQt5.QtDesigner `
+            --exclude-module PyQt5.QtHelp --exclude-module PyQt5.QtOpenGL `
+            --exclude-module PyQt5.QtCharts --exclude-module PyQt5.QtDataVisualization `
+            --exclude-module PyQt5.QtBluetooth --exclude-module PyQt5.QtPositioning `
+            --exclude-module PyQt5.QtNfc --exclude-module PyQt5.QtSerialPort `
+            --exclude-module tkinter --exclude-module test --exclude-module distutils `
+            --exclude-module idlelib --exclude-module ensurepip `
+            --collect-submodules PyQt5.QtCore --collect-submodules PyQt5.QtGui `
+            --collect-submodules PyQt5.QtWidgets `
+            --name ConnectHub-Client `
+            client/app.py
+          Get-Item dist\ConnectHub-Client.exe | Select-Object Name, @{Name='SizeMB';Expression={[math]::Round($_.Length/1MB,2)}}
 
-      - name: Build Server
+      - name: Build Server (体积优化版)
         shell: pwsh
-        run: pyinstaller --noconfirm --clean server/main.py --name ConnectHub-Server --console --paths . --paths server --add-data "protocol;protocol" --add-data "version.json;." --add-data "server/config.json;." --hidden-import websockets --hidden-import user_manager --hidden-import chat_history --hidden-import webrtc_signaling --hidden-import protocol --hidden-import protocol.messages
+        run: |
+          pyinstaller --noconfirm --clean `
+            --onefile --console --strip `
+            --paths . --paths server `
+            --add-data "protocol;protocol" `
+            --add-data "version.json;." `
+            --add-data "server/config.json;." `
+            --hidden-import websockets --hidden-import user_manager `
+            --hidden-import chat_history --hidden-import webrtc_signaling `
+            --hidden-import protocol --hidden-import protocol.messages `
+            --exclude-module PyQt5 --exclude-module PyQt5.QtCore `
+            --exclude-module PyQt5.QtGui --exclude-module PyQt5.QtWidgets `
+            --exclude-module PyQt5.QtNetwork --exclude-module PyQt5.QtWebEngineCore `
+            --exclude-module PyQt5.QtWebEngineWidgets --exclude-module PyQt5.QtMultimedia `
+            --exclude-module PyQt5.QtQuick --exclude-module PyQt5.QtQml `
+            --exclude-module tkinter --exclude-module test --exclude-module distutils `
+            --exclude-module idlelib --exclude-module ensurepip `
+            --name ConnectHub-Server `
+            server/main.py
+          Get-Item dist\ConnectHub-Server.exe | Select-Object Name, @{Name='SizeMB';Expression={[math]::Round($_.Length/1MB,2)}}
 
       - name: Verify build output
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path "dist\ConnectHub-Server\data" -Force
-          Get-ChildItem dist -Recurse -Depth 1 | Format-Table
+          Write-Host "Build output:"
+          Get-ChildItem dist\*.exe | Select-Object Name, @{Name='SizeMB';Expression={[math]::Round($_.Length/1MB,2)}}
 
       - name: Build installer with InnoSetup
         shell: pwsh
@@ -89,21 +151,21 @@ jobs:
           $tag = "${{ github.ref_name }}"
           Write-Host "Tag is $tag"
 
-          Compress-Archive -Path "dist\ConnectHub-Client\*" -DestinationPath "ConnectHub-Client.zip" -Force
-          Compress-Archive -Path "dist\ConnectHub-Server\*" -DestinationPath "ConnectHub-Server.zip" -Force
-
-          Write-Host "Files for release:"
-          Get-ChildItem *.zip, *.exe | Format-Table Name, Length
+          # --onefile 后直接是单个 exe，无需 zip
+          $clientExe = Get-Item "dist\ConnectHub-Client.exe"
+          $serverExe = Get-Item "dist\ConnectHub-Server.exe"
+          Write-Host "Client: $($clientExe.Name) - $([math]::Round($clientExe.Length/1MB,2)) MB"
+          Write-Host "Server: $($serverExe.Name) - $([math]::Round($serverExe.Length/1MB,2)) MB"
 
           $fileArgs = @()
           if (Test-Path "ConnectHub-Setup.exe") {
             $fileArgs += "ConnectHub-Setup.exe"
           }
-          $fileArgs += "ConnectHub-Client.zip"
-          $fileArgs += "ConnectHub-Server.zip"
+          $fileArgs += "dist\ConnectHub-Client.exe"
+          $fileArgs += "dist\ConnectHub-Server.exe"
 
           Write-Host "Creating release with files: $($fileArgs -join ', ')"
-          & gh release create $tag @fileArgs --title "ConnectHub $tag" --notes "ConnectHub $tag - download and run"
+          & gh release create $tag @fileArgs --title "ConnectHub $tag" --notes "ConnectHub $tag - 轻量级即时通讯/文件传输/远程桌面"
           Write-Host "gh exit code $LASTEXITCODE"
 
       - name: Upload artifacts
@@ -111,7 +173,7 @@ jobs:
         with:
           name: ConnectHub-Packages
           path: |
-            ConnectHub-Client.zip
-            ConnectHub-Server.zip
+            dist\ConnectHub-Client.exe
+            dist\ConnectHub-Server.exe
             ConnectHub-Setup.exe
           if-no-files-found: warn
