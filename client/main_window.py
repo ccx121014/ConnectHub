@@ -57,52 +57,101 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE = 32 * 1024  # 32KB per chunk for file transfer
 
 
+class FileSendWorker(QObject):
+    """后台线程发送文件分块 — 避免阻塞 UI。"""
+
+    progress = pyqtSignal(str, int)  # file_id, percent
+    finished = pyqtSignal(str, str)  # file_id, file_name
+    error = pyqtSignal(str, str)  # file_id, error message
+
+    def __init__(self, ws_client, target, file_id, file_path, parent=None):
+        super().__init__(parent)
+        self._ws_client = ws_client
+        self._target = target
+        self._file_id = file_id
+        self._file_path = file_path
+        self._cancelled = False
+
+    def cancel(self):
+        self._cancelled = True
+
+    @pyqtSlot()
+    def do_work(self):
+        try:
+            import os as _os
+            if not _os.path.exists(self._file_path):
+                raise RuntimeError("文件不存在")
+
+            file_size = _os.path.getsize(self._file_path)
+            file_name = _os.path.basename(self._file_path)
+            total_chunks = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
+
+            with open(self._file_path, "rb") as f:
+                for chunk_index in range(total_chunks):
+                    if self._cancelled:
+                        return
+                    chunk_data = f.read(CHUNK_SIZE)
+                    encoded = base64.b64encode(chunk_data).decode("ascii")
+                    self._ws_client.send_file_transfer_data(
+                        self._target, self._file_id, chunk_index, encoded
+                    )
+                    progress = int((chunk_index + 1) * 100 / total_chunks)
+                    self.progress.emit(self._file_id, progress)
+
+            if not self._cancelled:
+                self._ws_client.send_file_transfer_complete(
+                    self._target, self._file_id, total_chunks
+                )
+                self.finished.emit(self._file_id, file_name)
+        except Exception as e:
+            self.error.emit(self._file_id, str(e))
+
+
 class ConnectionStatusIndicator(QWidget):
-    """
-    Widget showing connection status with color indicator.
-    """
+    """Widget showing connection status with color indicator."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._status = "disconnected"
-
         self._init_ui()
 
     def _init_ui(self):
-        """Initialize the user interface."""
         layout = QHBoxLayout(self)
         layout.setContentsMargins(5, 0, 5, 0)
-        layout.setSpacing(5)
+        layout.setSpacing(8)
 
         self.status_dot = QLabel()
-        self.status_dot.setFixedSize(10, 10)
-        self.status_dot.setStyleSheet("background-color: #9E9E9E; border-radius: 5px;")
+        self.status_dot.setFixedSize(12, 12)
+        self._apply_dot_style("#9E9E9E")
         layout.addWidget(self.status_dot)
 
         self.status_text = QLabel("未连接")
-        self.status_text.setStyleSheet("color: #757575; font-size: 12px;")
+        self.status_text.setStyleSheet("color: #757575; font-size: 12px; font-weight: 500;")
         layout.addWidget(self.status_text)
 
-    def set_status(self, status: str):
-        """Set the connection status."""
-        self._status = status
+    def _apply_dot_style(self, color: str):
+        self.status_dot.setStyleSheet(
+            f"background-color: {color}; border: 2px solid rgba(255,255,255,0.5); border-radius: 6px;"
+        )
 
+    def set_status(self, status: str):
+        self._status = status
         if status == "connected":
-            self.status_dot.setStyleSheet("background-color: #4CAF50; border-radius: 5px;")
+            self._apply_dot_style("#4CAF50")
             self.status_text.setText("已连接")
-            self.status_text.setStyleSheet("color: #4CAF50; font-size: 12px;")
+            self.status_text.setStyleSheet("color: #2E7D32; font-size: 12px; font-weight: 600;")
         elif status == "connecting":
-            self.status_dot.setStyleSheet("background-color: #FFC107; border-radius: 5px;")
+            self._apply_dot_style("#FFC107")
             self.status_text.setText("连接中...")
-            self.status_text.setStyleSheet("color: #FFC107; font-size: 12px;")
+            self.status_text.setStyleSheet("color: #F57F17; font-size: 12px; font-weight: 600;")
         elif status == "reconnecting":
-            self.status_dot.setStyleSheet("background-color: #FF9800; border-radius: 5px;")
+            self._apply_dot_style("#FF9800")
             self.status_text.setText("重新连接中...")
-            self.status_text.setStyleSheet("color: #FF9800; font-size: 12px;")
+            self.status_text.setStyleSheet("color: #E65100; font-size: 12px; font-weight: 600;")
         else:
-            self.status_dot.setStyleSheet("background-color: #9E9E9E; border-radius: 5px;")
+            self._apply_dot_style("#9E9E9E")
             self.status_text.setText("未连接")
-            self.status_text.setStyleSheet("color: #757575; font-size: 12px;")
+            self.status_text.setStyleSheet("color: #616161; font-size: 12px; font-weight: 600;")
 
 
 class FileTransferWidget(QWidget):
@@ -119,39 +168,40 @@ class FileTransferWidget(QWidget):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
 
         # Header
-        header_layout = QHBoxLayout()
         title = QLabel("📁 文件传输")
-        title.setStyleSheet("font-weight: bold; font-size: 14px;")
-        header_layout.addWidget(title)
-        header_layout.addStretch()
-        layout.addLayout(header_layout)
+        title.setStyleSheet("font-weight: 700; font-size: 15px; color: #212121;")
+        layout.addWidget(title)
 
         # Control panel: contact selector + send file button
         control_widget = QWidget()
         control_widget.setStyleSheet(
-            "QWidget { background: #F5F5F5; border: 1px solid #D0D0D0; border-radius: 6px; }"
+            "QWidget { background: #F9F9FB; border: 1px solid #E0E0E8; border-radius: 10px; }"
         )
         control_layout = QVBoxLayout(control_widget)
-        control_layout.setContentsMargins(10, 10, 10, 10)
-        control_layout.setSpacing(8)
+        control_layout.setContentsMargins(12, 12, 12, 12)
+        control_layout.setSpacing(10)
 
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("发送给："))
         self.contact_combo = QComboBox()
         self.contact_combo.setMinimumWidth(150)
-        self.contact_combo.setPlaceholderText("选择联系人")
+        self.contact_combo.setStyleSheet(
+            "QComboBox { padding: 6px 10px; border: 1px solid #D0D0D0; border-radius: 6px; background: white; font-size: 12px; min-height: 20px; }"
+            "QComboBox:focus { border: 1px solid #2196F3; }"
+            "QComboBox QAbstractItemView { padding: 4px; border: 1px solid #D0D0D0; }"
+        )
         row1.addWidget(self.contact_combo, 1)
 
         self.send_file_btn = QPushButton("📄 选择文件并发送")
-        self.send_file_btn.setMinimumHeight(32)
+        self.send_file_btn.setMinimumHeight(34)
         self.send_file_btn.setStyleSheet(
-            "QPushButton { background: #4CAF50; color: white; border: none; border-radius: 4px; padding: 6px 14px; font-weight: bold; }"
-            "QPushButton:hover { background: #45a049; }"
-            "QPushButton:disabled { background: #B0B0B0; color: #E0E0E0; }"
+            "QPushButton { background: #2E7D32; color: white; border: none; border-radius: 6px; padding: 8px 18px; font-weight: 600; font-size: 12px; }"
+            "QPushButton:hover { background: #388E3C; }"
+            "QPushButton:disabled { background: #BDBDBD; color: #EEEEEE; }"
         )
         self.send_file_btn.clicked.connect(self._on_send_file_clicked)
         self.send_file_btn.setEnabled(False)
@@ -159,28 +209,26 @@ class FileTransferWidget(QWidget):
 
         control_layout.addLayout(row1)
 
-        # Hint text
-        hint = QLabel("提示：也可以在左侧联系人列表上点击 📁 按钮直接发送文件")
+        hint = QLabel("💡 也可以在左侧联系人列表上点击 📁 按钮直接发送文件")
         hint.setStyleSheet("color: #757575; font-size: 11px;")
         control_layout.addWidget(hint)
 
         layout.addWidget(control_widget)
 
-        # Transfer list
-        list_label = QLabel("传输记录：")
-        list_label.setStyleSheet("font-weight: bold; font-size: 12px;")
+        list_label = QLabel("📜 传输记录：")
+        list_label.setStyleSheet("font-weight: 600; font-size: 12px; color: #424242;")
         layout.addWidget(list_label)
 
         self.transfer_list = QListWidget()
         self.transfer_list.setMinimumHeight(200)
         self.transfer_list.setStyleSheet(
-            "QListWidget { border: 1px solid #D0D0D0; border-radius: 4px; background: white; }"
-            "QListWidget::item { padding: 6px; border-bottom: 1px solid #EEE; }"
-            "QListWidget::item:hover { background: #F5F5F5; }"
+            "QListWidget { border: 1px solid #E0E0E8; border-radius: 8px; background: white; padding: 2px; font-size: 12px; }"
+            "QListWidget::item { padding: 8px 10px; border-bottom: 1px solid #F0F0F5; }"
+            "QListWidget::item:hover { background: #F5F5FB; }"
+            "QListWidget::item:selected { background: #E3F2FD; color: #1565C0; }"
         )
         layout.addWidget(self.transfer_list, 1)
 
-        # Empty state message
         self._update_empty_state()
 
     def _update_empty_state(self):
@@ -277,6 +325,15 @@ class FileTransferWidget(QWidget):
                         item.setText(f"❌ 失败: {info['file_name']} → {info['target']} ({error})")
                 break
 
+    def mark_transfer_error(self, transfer_id: str, error_msg: str):
+        """将某个传输标记为错误。"""
+        for i in range(self.transfer_list.count()):
+            item = self.transfer_list.item(i)
+            if item.data(Qt.UserRole) == transfer_id:
+                item.setText(f"❌ {item.text()} 失败：{error_msg}")
+                item.setForeground(QColor("#C62828"))
+                break
+
     def remove_transfer(self, transfer_id: str):
         """Remove a transfer from the list (usually done automatically after completion)."""
         for key in list(self._transfers.keys()):
@@ -308,49 +365,48 @@ class RemoteDesktopWidget(QWidget):
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
 
-        # Header
-        header_layout = QHBoxLayout()
         title = QLabel("🖥 远程桌面")
-        title.setStyleSheet("font-weight: bold; font-size: 14px;")
-        header_layout.addWidget(title)
-        header_layout.addStretch()
-        layout.addLayout(header_layout)
+        title.setStyleSheet("font-weight: 700; font-size: 15px; color: #212121;")
+        layout.addWidget(title)
 
-        # Control panel
         control_widget = QWidget()
         control_widget.setStyleSheet(
-            "QWidget { background: #F5F5F5; border: 1px solid #D0D0D0; border-radius: 6px; }"
+            "QWidget { background: #F9F9FB; border: 1px solid #E0E0E8; border-radius: 10px; }"
         )
         control_layout = QVBoxLayout(control_widget)
-        control_layout.setContentsMargins(10, 10, 10, 10)
-        control_layout.setSpacing(8)
+        control_layout.setContentsMargins(12, 12, 12, 12)
+        control_layout.setSpacing(10)
 
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("共享给："))
         self.contact_combo = QComboBox()
         self.contact_combo.setMinimumWidth(150)
+        self.contact_combo.setStyleSheet(
+            "QComboBox { padding: 6px 10px; border: 1px solid #D0D0D0; border-radius: 6px; background: white; font-size: 12px; min-height: 20px; }"
+            "QComboBox:focus { border: 1px solid #2196F3; }"
+        )
         row1.addWidget(self.contact_combo, 1)
 
         self.start_button = QPushButton("▶ 发起桌面共享")
-        self.start_button.setMinimumHeight(32)
+        self.start_button.setMinimumHeight(34)
         self.start_button.setStyleSheet(
-            "QPushButton { background: #2196F3; color: white; border: none; border-radius: 4px; padding: 6px 14px; font-weight: bold; }"
+            "QPushButton { background: #1565C0; color: white; border: none; border-radius: 6px; padding: 8px 16px; font-weight: 600; font-size: 12px; }"
             "QPushButton:hover { background: #1976D2; }"
-            "QPushButton:disabled { background: #B0B0B0; color: #E0E0E0; }"
+            "QPushButton:disabled { background: #BDBDBD; color: #EEEEEE; }"
         )
         self.start_button.clicked.connect(self._on_start_clicked)
         self.start_button.setEnabled(False)
         row1.addWidget(self.start_button)
 
         self.stop_button = QPushButton("⏹ 停止")
-        self.stop_button.setMinimumHeight(32)
+        self.stop_button.setMinimumHeight(34)
         self.stop_button.setStyleSheet(
-            "QPushButton { background: #F44336; color: white; border: none; border-radius: 4px; padding: 6px 14px; font-weight: bold; }"
+            "QPushButton { background: #C62828; color: white; border: none; border-radius: 6px; padding: 8px 16px; font-weight: 600; font-size: 12px; }"
             "QPushButton:hover { background: #D32F2F; }"
-            "QPushButton:disabled { background: #B0B0B0; color: #E0E0E0; }"
+            "QPushButton:disabled { background: #BDBDBD; color: #EEEEEE; }"
         )
         self.stop_button.clicked.connect(self._on_stop_clicked)
         self.stop_button.setEnabled(False)
@@ -358,23 +414,21 @@ class RemoteDesktopWidget(QWidget):
 
         control_layout.addLayout(row1)
 
-        hint = QLabel("提示：也可以在左侧联系人列表上点击 🖥 按钮直接发起共享")
+        hint = QLabel("💡 也可以在左侧联系人列表上点击 🖥 按钮直接发起共享")
         hint.setStyleSheet("color: #757575; font-size: 11px;")
         control_layout.addWidget(hint)
 
         layout.addWidget(control_widget)
 
-        # Status
         self.status_label = QLabel("未共享桌面")
-        self.status_label.setStyleSheet("color: #757575; padding: 8px; font-weight: bold;")
+        self.status_label.setStyleSheet("color: #616161; padding: 10px; font-weight: 600; background: #F5F5FB; border-radius: 6px;")
         self.status_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.status_label)
 
-        # Preview area
         self.preview_label = QLabel("桌面画面将在此处显示")
         self.preview_label.setMinimumSize(500, 300)
         self.preview_label.setStyleSheet(
-            "background-color: #2D2D2D; color: #9E9E9E; border-radius: 6px; font-size: 13px;"
+            "background-color: #1A1A2E; color: #B0B0C8; border: 1px solid #3A3A5A; border-radius: 10px; font-size: 13px; font-weight: 500;"
         )
         self.preview_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.preview_label, 1)
@@ -483,7 +537,11 @@ class MainWindow(QMainWindow):
         # 文件传输状态: file_id -> {'chunks': {index: data}, 'total': N, 'sender': '...', 'name': '...', 'size': S}
         self._incoming_files: Dict[str, Dict] = {}
         # 发送中的文件: file_id -> {'target': '...', 'name': '...', 'file_path': '...', 'chunks': N}
-        self._pending_sends: Dict[str, str] = {}  # file_id -> target (waiting for response)
+        self._pending_sends: Dict[str, str] = {}  # file_id -> file_path (waiting for response)
+
+        # 后台文件发送线程管理
+        self._file_workers: Dict[str, QObject] = {}  # file_id -> worker
+        self._file_threads: Dict[str, QObject] = {}  # file_id -> thread
 
         # 桌面共享状态
         self._desktop_share_target: Optional[str] = None  # who we are sharing with
@@ -745,31 +803,47 @@ class MainWindow(QMainWindow):
         self._send_file_chunks(sender, file_id, file_path)
 
     def _send_file_chunks(self, target: str, file_id: str, file_path: str):
-        """将文件分块发送给目标用户。"""
+        """用后台线程发送文件分块 — 不再阻塞 UI。"""
         try:
-            file_size = os.path.getsize(file_path)
-            file_name = os.path.basename(file_path)
-            total_chunks = (file_size + CHUNK_SIZE - 1) // CHUNK_SIZE
+            thread = QThread()
+            worker = FileSendWorker(self._ws_client, target, file_id, file_path)
+            worker.moveToThread(thread)
 
-            with open(file_path, "rb") as f:
-                for chunk_index in range(total_chunks):
-                    chunk_data = f.read(CHUNK_SIZE)
-                    # Base64 编码以便 JSON 传输
-                    encoded = base64.b64encode(chunk_data).decode("ascii")
-                    self._ws_client.send_file_transfer_data(target, file_id, chunk_index, encoded)
+            worker.progress.connect(
+                lambda fid, pct: self.file_transfer_widget.update_progress(fid, pct)
+            )
+            worker.finished.connect(self._on_file_send_finished)
+            worker.error.connect(self._on_file_send_error)
 
-                    # 更新进度
-                    progress = int((chunk_index + 1) * 100 / total_chunks)
-                    self.file_transfer_widget.update_progress(file_id, progress)
+            thread.started.connect(worker.do_work)
+            worker.finished.connect(thread.quit)
+            worker.finished.connect(worker.deleteLater)
+            worker.error.connect(thread.quit)
+            thread.finished.connect(thread.deleteLater)
 
-            # 发送完成消息
-            self._ws_client.send_file_transfer_complete(target, file_id, total_chunks)
-            self.file_transfer_widget.remove_transfer(file_id)
-            self.statusBar().showMessage(f"文件 {file_name} 发送完成")
-            logger.info(f"File transfer completed: {file_name} -> {target}")
+            self._file_workers[file_id] = worker
+            self._file_threads[file_id] = thread
+
+            thread.start()
         except Exception as e:
-            logger.error(f"Error sending file: {e}", exc_info=True)
-            QMessageBox.critical(self, "发送失败", f"发送文件时出错：{e}")
+            logger.error(f"Error starting file send thread: {e}", exc_info=True)
+            QMessageBox.critical(self, "发送失败", f"启动发送线程时出错：{e}")
+
+    def _on_file_send_finished(self, file_id: str, file_name: str):
+        """文件发送完成的回调。"""
+        self.file_transfer_widget.remove_transfer(file_id)
+        self.statusBar().showMessage(f"文件 {file_name} 发送完成")
+        self._file_workers.pop(file_id, None)
+        self._file_threads.pop(file_id, None)
+        logger.info(f"File transfer completed: {file_name}")
+
+    def _on_file_send_error(self, file_id: str, error_msg: str):
+        """文件发送出错的回调。"""
+        self.file_transfer_widget.mark_transfer_error(file_id, error_msg)
+        self.statusBar().showMessage(f"文件发送失败: {error_msg}")
+        QMessageBox.critical(self, "发送失败", f"发送文件时出错：{error_msg}")
+        self._file_workers.pop(file_id, None)
+        self._file_threads.pop(file_id, None)
 
     def _handle_file_transfer_data(self, message: Message):
         """接收文件数据块。"""

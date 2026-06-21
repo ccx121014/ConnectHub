@@ -104,38 +104,38 @@ class ContactItem(QWidget):
         # Action buttons
         btn_style = """
             QPushButton {
-                background: transparent;
+                background: white;
                 border: 1px solid #D0D0D0;
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-size: 12px;
+                border-radius: 5px;
+                padding: 3px 8px;
+                font-size: 13px;
             }
             QPushButton:hover {
-                background: #E8F0FE;
-                border: 1px solid #4CAF50;
+                background: #E3F2FD;
+                border: 1px solid #2196F3;
             }
             QPushButton:pressed {
-                background: #D8E8DD;
+                background: #BBDEFB;
             }
         """
 
         self.chat_btn = QPushButton("💬")
         self.chat_btn.setToolTip("发送消息")
-        self.chat_btn.setFixedSize(32, 28)
+        self.chat_btn.setFixedSize(34, 30)
         self.chat_btn.setStyleSheet(btn_style)
         self.chat_btn.clicked.connect(lambda: self.chat_clicked.emit(self.username))
         layout.addWidget(self.chat_btn)
 
         self.file_btn = QPushButton("📁")
         self.file_btn.setToolTip("发送文件")
-        self.file_btn.setFixedSize(32, 28)
+        self.file_btn.setFixedSize(34, 30)
         self.file_btn.setStyleSheet(btn_style)
         self.file_btn.clicked.connect(lambda: self.file_clicked.emit(self.username))
         layout.addWidget(self.file_btn)
 
         self.desktop_btn = QPushButton("🖥")
         self.desktop_btn.setToolTip("发起桌面共享")
-        self.desktop_btn.setFixedSize(32, 28)
+        self.desktop_btn.setFixedSize(34, 30)
         self.desktop_btn.setStyleSheet(btn_style)
         self.desktop_btn.clicked.connect(lambda: self.desktop_clicked.emit(self.username))
         layout.addWidget(self.desktop_btn)

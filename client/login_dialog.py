@@ -108,19 +108,31 @@ class LoginDialog(QDialog):
         button_layout = QHBoxLayout()
 
         self.register_button = QPushButton("注册")
-        self.register_button.setObjectName("register_button")
+        self.register_button.setStyleSheet(
+            "QPushButton { background: #616161; color: white; border: none; border-radius: 6px; padding: 8px 20px; font-weight: 600; font-size: 12px; }"
+            "QPushButton:hover { background: #757575; }"
+            "QPushButton:disabled { background: #BDBDBD; color: #EEEEEE; }"
+        )
         self.register_button.clicked.connect(self._on_register_clicked)
         self.register_button.setEnabled(False)
         button_layout.addWidget(self.register_button)
 
         self.connect_button = QPushButton("连接")
-        self.connect_button.setObjectName("connect_button")
+        self.connect_button.setStyleSheet(
+            "QPushButton { background: #2E7D32; color: white; border: none; border-radius: 6px; padding: 8px 20px; font-weight: 700; font-size: 12px; }"
+            "QPushButton:hover { background: #388E3C; }"
+            "QPushButton:disabled { background: #BDBDBD; color: #EEEEEE; }"
+        )
         self.connect_button.clicked.connect(self._on_connect_clicked)
         self.connect_button.setEnabled(False)
         self.connect_button.setDefault(True)
         button_layout.addWidget(self.connect_button)
 
         self.cancel_button = QPushButton("取消")
+        self.cancel_button.setStyleSheet(
+            "QPushButton { background: #F5F5F5; color: #424242; border: 1px solid #C0C0C0; border-radius: 6px; padding: 8px 20px; font-weight: 600; font-size: 12px; }"
+            "QPushButton:hover { background: #E0E0E0; }"
+        )
         self.cancel_button.clicked.connect(self.reject)
         button_layout.addWidget(self.cancel_button)
 

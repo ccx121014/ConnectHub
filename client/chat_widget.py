@@ -250,6 +250,12 @@ class ChatWidget(QWidget):
         self.send_button.setEnabled(False)
         self.send_button.clicked.connect(self._on_send_clicked)
         self.send_button.setMinimumWidth(80)
+        self.send_button.setMinimumHeight(34)
+        self.send_button.setStyleSheet(
+            "QPushButton { background: #2E7D32; color: white; border: none; border-radius: 6px; padding: 8px 18px; font-weight: 600; font-size: 12px; }"
+            "QPushButton:hover { background: #388E3C; }"
+            "QPushButton:disabled { background: #BDBDBD; color: #EEEEEE; }"
+        )
         message_layout.addWidget(self.send_button)
 
         input_layout.addLayout(message_layout)
