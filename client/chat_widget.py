@@ -53,13 +53,10 @@ class BubbleMessage(tk.Frame):
 
         # Outer row container (for left/right alignment of whole bubble)
         outer = tk.Frame(self, bg="#F9F9FB")
-        outer.pack(fill="x", pady=4)
-
         if self.is_own:
-            # Push bubble to the right
-            outer.pack(fill="x", padx=(80, 10))
+            outer.pack(fill="x", padx=(80, 10), pady=4)
         else:
-            outer.pack(fill="x", padx=(10, 80))
+            outer.pack(fill="x", padx=(10, 80), pady=4)
 
         # Bubble container
         bubble = tk.Frame(outer, bg=bubble_bg,
