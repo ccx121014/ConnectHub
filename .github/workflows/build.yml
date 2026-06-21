@@ -22,9 +22,7 @@ jobs:
 
     - name: Install Python dependencies
       shell: pwsh
-      run: |
-        python -m pip install --upgrade pip
-        pip install PyQt5 websockets pyinstaller
+      run: pip install --upgrade pip PyQt5 websockets pyinstaller
 
     - name: Build Client with PyInstaller
       shell: pwsh
@@ -34,29 +32,77 @@ jobs:
       shell: pwsh
       run: pyinstaller --noconfirm --clean server/main.py --name ConnectHub-Server --console --add-data "protocol;protocol" --add-data "version.json;." --add-data "server/config.json;." --hidden-import websockets
 
-    - name: Prepare output directories
+    - name: Prepare directories and verify
       shell: pwsh
       run: |
-        if (-not (Test-Path "dist\ConnectHub-Server\data")) {
-          New-Item -ItemType Directory -Path "dist\ConnectHub-Server\data" -Force
+        New-Item -ItemType Directory -Path "dist\ConnectHub-Server\data" -Force
+        Write-Host "=== Build output ==="
+        Get-ChildItem dist | Format-Table
+        Write-Host "=== Verifying files ==="
+        $clientExists = Test-Path "dist\ConnectHub-Client\ConnectHub-Client.exe"
+        $serverExists = Test-Path "dist\ConnectHub-Server\ConnectHub-Server.exe"
+        Write-Host "Client exe: $clientExists"
+        Write-Host "Server exe: $serverExists"
+        if ((Get-ChildItem "dist\ConnectHub-Client" -Recurse -Filter "*.dll").Count -gt 0) {
+          Write-Host "DLL files found in client: OK"
         }
-        Write-Host "Build output:"
-        Get-ChildItem dist
 
-    - name: Install NSIS
-      shell: pwsh
-      run: choco install nsis -y --no-progress
-
-    - name: Build NSIS installer
+    - name: Build installer using InnoSetup (fallback: just ZIP)
       shell: pwsh
       run: |
-        $env:PATH = "C:\Program Files (x86)\NSIS;C:\Program Files\NSIS;C:\ProgramData\chocolatey\bin;" + $env:PATH
-        & makensis installer\installer.nsi
-        if (Test-Path ConnectHub-Setup.exe) {
-          Write-Host "SUCCESS: ConnectHub-Setup.exe created"
-        } else {
-          Write-Host "ERROR: ConnectHub-Setup.exe not found"
-          exit 1
+        # Try InnoSetup first
+        try {
+          choco install innosetup -y --no-progress
+          $iscc = Get-ChildItem -Path "C:\Program Files (x86)\Inno Setup 6" -Filter "iscc.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $iscc) {
+            Write-Host "InnoSetup not found, falling back to ZIP-only release"
+            throw "InnoSetup not found"
+          }
+          Write-Host "Using iscc at: $iscc"
+
+          # Generate InnoSetup script programmatically
+          $iss = @"
+[Setup]
+AppName=ConnectHub
+AppVersion=1.0.6
+DefaultDirName={pf}\ConnectHub
+DefaultGroupName=ConnectHub
+OutputBaseFilename=ConnectHub-Setup
+Compression=lzma2
+SolidCompression=yes
+WizardStyle=modern
+PrivilegesRequired=admin
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Files]
+Source: "dist\ConnectHub-Client\*"; DestDir: "{app}\client"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "dist\ConnectHub-Server\*"; DestDir: "{app}\server"; Flags: recursesubdirs createallsubdirs ignoreversion
+
+[Icons]
+Name: "{group}\ConnectHub"; Filename: "{app}\client\ConnectHub-Client.exe"
+Name: "{group}\ConnectHub Server"; Filename: "{app}\server\ConnectHub-Server.exe"
+Name: "{group}\Uninstall ConnectHub"; Filename: "{uninstallexe}"
+Name: "{desktop}\ConnectHub"; Filename: "{app}\client\ConnectHub-Client.exe"
+Name: "{desktop}\ConnectHub Server"; Filename: "{app}\server\ConnectHub-Server.exe"
+
+[Run]
+Filename: "{app}\client\ConnectHub-Client.exe"; Description: "Launch ConnectHub"; Flags: nowait postinstall skipifsilent
+"@
+
+          [System.IO.File]::WriteAllText("$PWD\installer\setup.iss", $iss, [System.Text.ASCIIEncoding]::new())
+          Write-Host "=== Running iscc ==="
+          & $iscc installer\setup.iss 2>&1 | Out-String | Write-Host
+          if (Test-Path "ConnectHub-Setup.exe") {
+            Write-Host "SUCCESS: ConnectHub-Setup.exe built"
+            $script:installerBuilt = $true
+          } else {
+            Write-Host "InnoSetup failed to produce installer. ZIP-only will be used."
+          }
+        } catch {
+          Write-Host "InnoSetup not available or failed: $_"
+          Write-Host "Proceeding with ZIP-only release"
         }
 
     - name: Release artifacts
@@ -65,20 +111,23 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         $tag = "${{ github.ref_name }}"
-
-        # Build ZIP packages
+        $files = @()
         Compress-Archive -Path "dist\ConnectHub-Client\*" -DestinationPath "ConnectHub-Client.zip"
         Compress-Archive -Path "dist\ConnectHub-Server\*" -DestinationPath "ConnectHub-Server.zip"
+        $files += 'ConnectHub-Client.zip#ConnectHub Client (portable - unzip and double-click)'
+        $files += 'ConnectHub-Server.zip#ConnectHub Server (portable - unzip and double-click)'
+        if (Test-Path "ConnectHub-Setup.exe") {
+          $files = @('ConnectHub-Setup.exe#ConnectHub Installer (double-click to install)') + $files
+        }
+        $notes = "ConnectHub " + $tag
+        if (-not (Test-Path "ConnectHub-Setup.exe")) {
+          $notes += "`n`nNote: Installer build failed. Please use the ZIP packages."
+        }
+        gh release create $tag --title ("ConnectHub " + $tag) --notes $notes @files
 
-        # Create release with all files
-        $notes = "ConnectHub " + $tag + "`n`n- ConnectHub-Setup.exe: Double-click to install (recommended)`n- ConnectHub-Client.zip: Client (portable)`n- ConnectHub-Server.zip: Server (portable)"
-        gh release create $tag --title ("ConnectHub " + $tag) --notes $notes `
-          'ConnectHub-Setup.exe#ConnectHub Installer (double-click to install)' `
-          'ConnectHub-Client.zip#ConnectHub Client (portable)' `
-          'ConnectHub-Server.zip#ConnectHub Server (portable)'
-
-    - name: Upload artifacts
+    - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ConnectHub-Setup
-        path: ConnectHub-Setup.exe
+        name: ConnectHub-Build
+        path: "*.zip,ConnectHub-Setup.exe"
+        if-no-files-found: warn
