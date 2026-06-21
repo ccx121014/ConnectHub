@@ -10,6 +10,8 @@ jobs:
   build-windows:
     runs-on: windows-latest
     timeout-minutes: 90
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout code
@@ -87,26 +89,21 @@ jobs:
           $tag = "${{ github.ref_name }}"
           Write-Host "Tag is $tag"
 
-          Write-Host "Listing working directory"
-          Get-ChildItem -Force | Format-Table Name, Length
-
           Compress-Archive -Path "dist\ConnectHub-Client\*" -DestinationPath "ConnectHub-Client.zip" -Force
           Compress-Archive -Path "dist\ConnectHub-Server\*" -DestinationPath "ConnectHub-Server.zip" -Force
 
-          Write-Host "After zip"
+          Write-Host "Files for release:"
           Get-ChildItem *.zip, *.exe | Format-Table Name, Length
 
           $fileArgs = @()
           if (Test-Path "ConnectHub-Setup.exe") {
-            $fileArgs += 'ConnectHub-Setup.exe#ConnectHub Installer - double click to install'
+            $fileArgs += "ConnectHub-Setup.exe"
           }
-          $fileArgs += 'ConnectHub-Client.zip#ConnectHub Client - unzip and run'
-          $fileArgs += 'ConnectHub-Server.zip#ConnectHub Server - unzip and run'
+          $fileArgs += "ConnectHub-Client.zip"
+          $fileArgs += "ConnectHub-Server.zip"
 
-          $notes = "ConnectHub release"
-          Write-Host "Running gh release create $tag with $($fileArgs.Count) files"
-          Write-Host "Files: $($fileArgs -join ', ')"
-          & gh release create $tag @fileArgs --title "ConnectHub $tag" --notes $notes
+          Write-Host "Creating release with files: $($fileArgs -join ', ')"
+          & gh release create $tag @fileArgs --title "ConnectHub $tag" --notes "ConnectHub $tag - download and run"
           Write-Host "gh exit code $LASTEXITCODE"
 
       - name: Upload artifacts
