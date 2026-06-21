@@ -20,28 +20,91 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.13'
+          python-version: '3.11'
 
-      - name: Install Python dependencies
+      - name: Install dependencies + UPX
         shell: pwsh
         run: |
           pip install --upgrade pip PyQt5 websockets pyinstaller
-          # 删除 PyQt5 多语言文件（每个 locale ~1MB，共 50+ 个语言包）
-          $pyPath = "$env:USERPROFILE\AppData\Local\Programs\Python\Python313"
-          Remove-Item -Recurse -Force "$pyPath\Lib\site-packages\PyQt5\Qt5\translations" -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "$pyPath\Lib\site-packages\PyQt5\Qt5\qml" -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "$pyPath\Lib\site-packages\PyQt5\Qt5\doc" -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "$pyPath\Lib\site-packages\PyQt5\Qt5\examples" -ErrorAction SilentlyContinue
-          # 清理 Python 标准库不需要的部分
-          Remove-Item -Recurse -Force "$pyPath\Lib\test" -ErrorAction SilentlyContinue
-          Remove-Item -Recurse -Force "$pyPath\Lib\idlelib" -ErrorAction SilentlyContinue
-          Write-Host "Cleanup done, Python 3.13 + trimmed PyQt5 ready"
+          # 下载 UPX 压缩工具 (4.2.4 win64)
+          $upxUrl = "https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-win64.zip"
+          Invoke-WebRequest -Uri $upxUrl -OutFile "$env:TEMP\upx.zip" -UseBasicParsing
+          Expand-Archive -Path "$env:TEMP\upx.zip" -DestinationPath "$env:TEMP\upx" -Force
+          $upxExe = Get-ChildItem "$env:TEMP\upx" -Filter "upx.exe" -Recurse | Select-Object -First 1 -ExpandProperty FullName
+          Write-Host "UPX installed at: $upxExe"
+          # 持久保存 UPX 路径
+          echo "UPX_PATH=$upxExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Build Client (超轻量版)
+      - name: Find and trim PyQt5 (DYNAMIC path)
         shell: pwsh
         run: |
+          # 动态查找 PyQt5 真实安装路径
+          $pyqt5Dir = python -c "import PyQt5, os; print(os.path.dirname(PyQt5.__file__))"
+          Write-Host "PyQt5 installed at: $pyqt5Dir"
+          # 删除 Qt 多语言文件 (最大的浪费: 50+ 语言包 = ~30 MB)
+          $transDir = "$pyqt5Dir\Qt5\translations"
+          if (Test-Path $transDir) {
+            $sizeBefore = (Get-ChildItem $transDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
+            Remove-Item -Recurse -Force $transDir
+            Write-Host "Deleted translations: $([math]::Round($sizeBefore,2)) MB"
+          }
+          # 删除 QML 运行时 (~5 MB)
+          $qmlDir = "$pyqt5Dir\Qt5\qml"
+          if (Test-Path $qmlDir) {
+            $sizeBefore = (Get-ChildItem $qmlDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB
+            Remove-Item -Recurse -Force $qmlDir
+            Write-Host "Deleted qml: $([math]::Round($sizeBefore,2)) MB"
+          }
+          # 删除文档和示例
+          $docDir = "$pyqt5Dir\Qt5\doc"
+          if (Test-Path $docDir) { Remove-Item -Recurse -Force $docDir; Write-Host "Deleted doc" }
+          $examplesDir = "$pyqt5Dir\Qt5\examples"
+          if (Test-Path $examplesDir) { Remove-Item -Recurse -Force $examplesDir; Write-Host "Deleted examples" }
+          # 删除我们用不到的 Qt 模块 DLL (关键！)
+          $qtBinDir = "$pyqt5Dir\Qt5\bin"
+          if (Test-Path $qtBinDir) {
+            $unneededDlls = @(
+              "Qt5WebEngine*.dll",
+              "Qt5Quick*.dll",
+              "Qt5Qml*.dll",
+              "Qt5Multimedia*.dll",
+              "Qt53D*.dll",
+              "Qt5Sql.dll",
+              "Qt5Xml.dll",
+              "Qt5XmlPatterns.dll",
+              "Qt5Svg.dll",
+              "Qt5SvgWidgets.dll",
+              "Qt5OpenGL.dll",
+              "Qt5Charts.dll",
+              "Qt5DataVisualization.dll",
+              "Qt5Bluetooth.dll",
+              "Qt5Positioning.dll",
+              "Qt5Nfc.dll",
+              "Qt5SerialPort.dll",
+              "Qt5PrintSupport.dll",
+              "Qt5Designer.dll",
+              "Qt5Help.dll",
+              "Qt5Test.dll",
+              "Qt5WebKit*.dll"
+            )
+            foreach ($pattern in $unneededDlls) {
+              Get-ChildItem $qtBinDir -Filter $pattern -ErrorAction SilentlyContinue | Remove-Item -Force
+            }
+            # 统计剩余的 Qt DLL (应该只有 Core/Gui/Widgets/Network)
+            $remainingDlls = Get-ChildItem $qtBinDir -Filter "Qt5*.dll" -ErrorAction SilentlyContinue
+            Write-Host "Remaining Qt DLLs: $($remainingDlls.Count)"
+            foreach ($d in $remainingDlls) {
+              Write-Host "  $($d.Name): $([math]::Round($d.Length/1MB,2)) MB"
+            }
+          }
+          Write-Host "PyQt5 trimming complete"
+
+      - name: Build Client (onedir + UPX 压缩版)
+        shell: pwsh
+        run: |
+          # Step 1: 用 --onedir 模式构建 (方便后续 DLL 级别压缩和清理)
           pyinstaller --noconfirm --clean `
-            --onefile --windowed --strip `
+            --noconfirm --windowed --strip `
             --paths . --paths client `
             --add-data "protocol;protocol" `
             --add-data "version.json;." `
@@ -51,37 +114,74 @@ jobs:
             --hidden-import contact_list --hidden-import file_transfer `
             --hidden-import login_dialog --hidden-import updater `
             --hidden-import protocol.messages --hidden-import protocol `
-            --hidden-import PyQt5.QtCore --hidden-import PyQt5.QtGui `
-            --hidden-import PyQt5.QtWidgets --hidden-import PyQt5.QtNetwork `
-            --exclude-module PyQt5.QtWebEngineCore --exclude-module PyQt5.QtWebEngineWidgets `
-            --exclude-module PyQt5.QtWebEngine --exclude-module PyQt5.QtWebKit `
-            --exclude-module PyQt5.QtWebKitWidgets --exclude-module PyQt5.QtMultimedia `
-            --exclude-module PyQt5.QtMultimediaWidgets --exclude-module PyQt5.QtQuick `
-            --exclude-module PyQt5.QtQuickWidgets --exclude-module PyQt5.QtQml `
-            --exclude-module PyQt5.Qt3DCore --exclude-module PyQt5.Qt3DRender `
-            --exclude-module PyQt5.Qt3DAnimation --exclude-module PyQt5.Qt3DInput `
-            --exclude-module PyQt5.Qt3DLogic --exclude-module PyQt5.Qt3DExtras `
-            --exclude-module PyQt5.QtSql --exclude-module PyQt5.QtXml `
-            --exclude-module PyQt5.QtXmlPatterns --exclude-module PyQt5.QtSvg `
-            --exclude-module PyQt5.QtSvgWidgets --exclude-module PyQt5.QtTest `
-            --exclude-module PyQt5.QtPrintSupport --exclude-module PyQt5.QtDesigner `
-            --exclude-module PyQt5.QtHelp --exclude-module PyQt5.QtOpenGL `
-            --exclude-module PyQt5.QtCharts --exclude-module PyQt5.QtDataVisualization `
-            --exclude-module PyQt5.QtBluetooth --exclude-module PyQt5.QtPositioning `
-            --exclude-module PyQt5.QtNfc --exclude-module PyQt5.QtSerialPort `
-            --exclude-module tkinter --exclude-module test --exclude-module distutils `
-            --exclude-module idlelib --exclude-module ensurepip `
             --collect-submodules PyQt5.QtCore --collect-submodules PyQt5.QtGui `
             --collect-submodules PyQt5.QtWidgets `
             --name ConnectHub-Client `
             client/app.py
-          Get-Item dist\ConnectHub-Client.exe | Select-Object Name, @{Name='SizeMB';Expression={[math]::Round($_.Length/1MB,2)}}
+          $clientDir = "dist\ConnectHub-Client"
+          # Step 2: 列出文件帮助调试
+          Write-Host "Files in client dist before cleanup:"
+          Get-ChildItem $clientDir -Recurse -File | Select-Object Name, @{N='SizeKB';E={[math]::Round($_.Length/1KB,1)}} | Sort-Object Length -Descending | Select-Object -First 30 | Format-Table -AutoSize
+          # Step 3: 删除 onedir 中多余的 Qt 插件 (只保留 platforms/qwindows.dll)
+          $pluginsDir = "$clientDir\PyQt5\Qt5\plugins"
+          if (Test-Path $pluginsDir) {
+            # 保留 platforms 目录 (qwindows.dll - Windows 必需)
+            # 删除其他插件目录
+            $keepDirs = @("platforms")
+            Get-ChildItem $pluginsDir -Directory | Where-Object { $_.Name -notin $keepDirs } | Remove-Item -Recurse -Force
+            Write-Host "Removed unnecessary Qt plugin directories"
+          }
+          # 清理 onedir 中 _internal 的 Qt 插件 (新的 PyInstaller 可能放在 _internal)
+          $internalDir = "$clientDir\_internal"
+          if (Test-Path $internalDir) {
+            $internalPlugins = Get-ChildItem $internalDir -Recurse -Directory -Filter "plugins" -ErrorAction SilentlyContinue
+            foreach ($pd in $internalPlugins) {
+              $keepDirs = @("platforms")
+              Get-ChildItem $pd.FullName -Directory | Where-Object { $_.Name -notin $keepDirs } | Remove-Item -Recurse -Force
+            }
+          }
+          # Step 4: 删除多余的 Qt DLL (只保留 Core/Gui/Widgets/Network)
+          $keepQtDlls = @("Qt5Core.dll", "Qt5Gui.dll", "Qt5Widgets.dll", "Qt5Network.dll")
+          Get-ChildItem $clientDir -Recurse -Filter "Qt5*.dll" | ForEach-Object {
+            if ($_.Name -notin $keepQtDlls) {
+              Write-Host "Removing unneeded: $($_.FullName)"
+              Remove-Item $_.FullName -Force
+            }
+          }
+          # Step 5: 删除多余的 PyQt5 Python 绑定 (.pyd)
+          $keepPyds = @("QtCore.pyd", "QtGui.pyd", "QtWidgets.pyd", "QtNetwork.pyd", "sip.pyd")
+          Get-ChildItem $clientDir -Recurse -Filter "*.pyd" | ForEach-Object {
+            if ($_.Name -like "Qt5*" -and $_.Name -replace "Qt5","" -notin $keepPyds) {
+              Write-Host "Removing unneeded pyd: $($_.FullName)"
+              Remove-Item $_.FullName -Force
+            }
+          }
+          # Step 6: UPX 压缩所有 DLL (最重要的一步 —— DLL 通常能压掉 40-60%)
+          $upxPath = $env:UPX_PATH
+          Write-Host "Running UPX at: $upxPath"
+          $dllCount = 0
+          $totalBefore = 0
+          $totalAfter = 0
+          Get-ChildItem $clientDir -Recurse -Include *.dll,*.pyd | ForEach-Object {
+            $before = $_.Length
+            & $upxPath -9 -q --no-progress $_.FullName 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              $dllCount++
+              $after = (Get-Item $_.FullName).Length
+              $totalBefore += $before
+              $totalAfter += $after
+            }
+          }
+          Write-Host "UPX compressed $dllCount files: $([math]::Round($totalBefore/1MB,2)) MB -> $([math]::Round($totalAfter/1MB,2)) MB (saved $([math]::Round(($totalBefore-$totalAfter)/1MB,2)) MB)"
+          # Step 7: 显示最终大小
+          $totalSize = (Get-ChildItem $clientDir -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
+          Write-Host "Final client folder size: $([math]::Round($totalSize,2)) MB"
 
-      - name: Build Server (超轻量版)
+      - name: Build Server (onedir 版)
         shell: pwsh
         run: |
           pyinstaller --noconfirm --clean `
-            --onefile --console --strip `
+            --console --strip `
             --paths . --paths server `
             --add-data "protocol;protocol" `
             --add-data "version.json;." `
@@ -98,24 +198,63 @@ jobs:
             --exclude-module idlelib --exclude-module ensurepip `
             --name ConnectHub-Server `
             server/main.py
-          Get-Item dist\ConnectHub-Server.exe | Select-Object Name, @{Name='SizeMB';Expression={[math]::Round($_.Length/1MB,2)}}
+          # UPX 压缩服务器端的 DLL
+          $serverDir = "dist\ConnectHub-Server"
+          $upxPath = $env:UPX_PATH
+          Get-ChildItem $serverDir -Recurse -Include *.dll,*.pyd | ForEach-Object {
+            & $upxPath -9 -q --no-progress $_.FullName 2>$null
+          }
+          $totalSize = (Get-ChildItem $serverDir -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
+          Write-Host "Final server folder size: $([math]::Round($totalSize,2)) MB"
 
-      - name: Verify build output
+      - name: Build single-file EXEs (for direct download)
         shell: pwsh
         run: |
-          Write-Host "Build output:"
-          Get-ChildItem dist\*.exe | Select-Object Name, @{Name='SizeMB';Expression={[math]::Round($_.Length/1MB,2)}}
+          # 客户端 onefile
+          pyinstaller --noconfirm --clean `
+            --onefile --windowed --strip `
+            --paths . --paths client `
+            --add-data "protocol;protocol" `
+            --add-data "version.json;." `
+            --add-data "client/config.json;." `
+            --hidden-import websockets --hidden-import websocket_client `
+            --hidden-import main_window --hidden-import chat_widget `
+            --hidden-import contact_list --hidden-import file_transfer `
+            --hidden-import login_dialog --hidden-import updater `
+            --hidden-import protocol.messages --hidden-import protocol `
+            --hidden-import PyQt5.QtCore --hidden-import PyQt5.QtGui `
+            --hidden-import PyQt5.QtWidgets --hidden-import PyQt5.QtNetwork `
+            --collect-submodules PyQt5.QtCore --collect-submodules PyQt5.QtGui `
+            --collect-submodules PyQt5.QtWidgets `
+            --name ConnectHub-Client-onefile `
+            client/app.py
+          # 服务器端 onefile
+          pyinstaller --noconfirm --clean `
+            --onefile --console --strip `
+            --paths . --paths server `
+            --add-data "protocol;protocol" `
+            --add-data "version.json;." `
+            --add-data "server/config.json;." `
+            --hidden-import websockets --hidden-import user_manager `
+            --hidden-import chat_history --hidden-import webrtc_signaling `
+            --hidden-import protocol --hidden-import protocol.messages `
+            --name ConnectHub-Server-onefile `
+            server/main.py
+          # 重命名去掉 -onefile 后缀
+          Move-Item "dist\ConnectHub-Client-onefile.exe" "dist\ConnectHub-Client.exe" -Force
+          Move-Item "dist\ConnectHub-Server-onefile.exe" "dist\ConnectHub-Server.exe" -Force
+          Write-Host "Onefile builds:"
+          Get-ChildItem dist\ConnectHub-Client.exe, dist\ConnectHub-Server.exe | Select-Object Name, @{N='SizeMB';E={[math]::Round($_.Length/1MB,2)}} | Format-Table -AutoSize
 
       - name: Build installer with InnoSetup
         shell: pwsh
-        continue-on-error: true
         run: |
           choco install innosetup -y --no-progress
           $iscc = Get-ChildItem -Path "C:\Program Files (x86)\Inno Setup 6","C:\Program Files\Inno Setup 6" -Filter "iscc.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
           if (-not $iscc) {
             Write-Host "iscc not found, trying other paths"
             Get-ChildItem -Path "C:\" -Filter "iscc.exe" -Recurse -ErrorAction SilentlyContinue -Depth 5 | Select-Object -First 3 -ExpandProperty FullName
-            exit 0
+            exit 1
           }
           Write-Host "Using iscc at $iscc"
           & $iscc installer\setup.iss
@@ -123,28 +262,11 @@ jobs:
           Write-Host "iscc exit code $exitCode"
           if (Test-Path "ConnectHub-Setup.exe") {
             Write-Host "SUCCESS installer built"
-            Get-Item ConnectHub-Setup.exe | Select-Object Name, Length
+            Get-Item ConnectHub-Setup.exe | Select-Object Name, @{N='SizeMB';E={[math]::Round($_.Length/1MB,2)}}
           } else {
             Write-Host "No installer found in working dir"
             $outputDir = Get-ChildItem -Path "." -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*Setup*" -or $_.Name -like "*installer*" } | Select-Object -First 5
             foreach ($f in $outputDir) { Write-Host $f.FullName }
-          }
-
-      - name: Build installer with NSIS as backup
-        shell: pwsh
-        continue-on-error: true
-        run: |
-          if (Test-Path "ConnectHub-Setup.exe") {
-            Write-Host "Installer already exists, skipping NSIS"
-            exit 0
-          }
-          choco install nsis -y --no-progress
-          $makensis = Get-ChildItem -Path "C:\Program Files (x86)\NSIS","C:\Program Files\NSIS" -Filter "makensis.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $makensis) { exit 0 }
-          Write-Host "Using makensis at $makensis"
-          & $makensis installer\installer.nsi
-          if (Test-Path "ConnectHub-Setup.exe") {
-            Write-Host "NSIS installer built"
           }
 
       - name: Create release
@@ -155,20 +277,22 @@ jobs:
           $tag = "${{ github.ref_name }}"
           Write-Host "Tag is $tag"
 
-          # --onefile 后直接是单个 exe，无需 zip
-          $clientExe = Get-Item "dist\ConnectHub-Client.exe"
-          $serverExe = Get-Item "dist\ConnectHub-Server.exe"
-          Write-Host "Client: $($clientExe.Name) - $([math]::Round($clientExe.Length/1MB,2)) MB"
-          Write-Host "Server: $($serverExe.Name) - $([math]::Round($serverExe.Length/1MB,2)) MB"
-
           $fileArgs = @()
           if (Test-Path "ConnectHub-Setup.exe") {
             $fileArgs += "ConnectHub-Setup.exe"
           }
-          $fileArgs += "dist\ConnectHub-Client.exe"
-          $fileArgs += "dist\ConnectHub-Server.exe"
+          if (Test-Path "dist\ConnectHub-Client.exe") {
+            $fileArgs += "dist\ConnectHub-Client.exe"
+          }
+          if (Test-Path "dist\ConnectHub-Server.exe") {
+            $fileArgs += "dist\ConnectHub-Server.exe"
+          }
 
-          Write-Host "Creating release with files: $($fileArgs -join ', ')"
+          Write-Host "Creating release with files:"
+          foreach ($f in $fileArgs) {
+            $fi = Get-Item $f
+            Write-Host "  $($fi.Name): $([math]::Round($fi.Length/1MB,2)) MB"
+          }
           & gh release create $tag @fileArgs --title "ConnectHub $tag" --notes "ConnectHub $tag - 轻量级即时通讯/文件传输/远程桌面"
           Write-Host "gh exit code $LASTEXITCODE"
 
