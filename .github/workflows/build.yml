@@ -107,6 +107,8 @@ jobs:
             --exclude-module py_compile --exclude-module modulefinder `
             --exclude-module symtable --exclude-module token `
             --exclude-module tokenize `
+            --exclude-module lzma --exclude-module _lzma `
+            --exclude-module bz2 --exclude-module _bz2 `
             --exclude-module bisect --exclude-module calendar `
             --exclude-module configparser --exclude-module getopt `
             --exclude-module argparse --exclude-module platform `
@@ -182,6 +184,33 @@ jobs:
           # 删除 _internal 中已知的测试/示例文件
           Get-ChildItem -Path "dist\ConnectHub-Client\_internal" -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^test_|_test\.py$|test_.*\.py$" } | Remove-Item -Force -ErrorAction SilentlyContinue
 
+          # --- 更激进的 tk/tcl 数据清理 ---
+          Write-Host "`nAggressive tk/tcl cleanup..."
+          $tclDirs = Get-ChildItem -Path "dist\ConnectHub-Client\_internal" -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^(tcl|tk|_tcl|_tk)" }
+          foreach ($dir in $tclDirs) {
+            # 删除 tcltest 模块（测试框架）
+            Get-ChildItem -Path $dir.FullName -Recurse -Directory -Filter "tcltest*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            # 删除 msgcat（消息目录，我们只用英文）
+            Get-ChildItem -Path $dir.FullName -Recurse -Directory -Filter "msgcat*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            # 删除 http 2.0（保留 http 2.9.8 作为最新）
+            Get-ChildItem -Path $dir.FullName -Recurse -Directory -Filter "http1.0" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            # 删除 opt 0.4（保留 opt 0.5）
+            Get-ChildItem -Path $dir.FullName -Recurse -Directory -Filter "opt0.4" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            # 删除 platform 模块（Tk platform detection）
+            Get-ChildItem -Path $dir.FullName -Recurse -File -Filter "platform.tcl" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+            # 删除所有 logo 图片（eps/gif/png）
+            Get-ChildItem -Path $dir.FullName -Recurse -File -Include "*.eps","*.gif","*.png","*.ico","*.bmp" -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+            # 删除 tzdata 目录（时区数据）
+            Get-ChildItem -Path $dir.FullName -Recurse -Directory -Filter "tzdata" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
+          # --- 删除所有 *.dist-info 目录（Python 包元数据）---
+          Write-Host "`nRemoving dist-info directories..."
+          Get-ChildItem -Path "dist\ConnectHub-Client\_internal" -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "\.dist-info$" } | ForEach-Object {
+            Write-Host "  Removing $($_.Name)"
+            Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+          }
+
           # --- 删除 OpenSSL DLL（已用 WinHTTP 替代，不再需要）---
           Write-Host "`nRemoving OpenSSL DLLs (replaced by WinHTTP)..."
           foreach ($dll in @("libcrypto-3.dll","libssl-3.dll","libcrypto-3-x64.dll","libssl-3-x64.dll")) {
@@ -242,6 +271,8 @@ jobs:
             --exclude-module py_compile --exclude-module modulefinder `
             --exclude-module symtable --exclude-module token `
             --exclude-module tokenize `
+            --exclude-module lzma --exclude-module _lzma `
+            --exclude-module bz2 --exclude-module _bz2 `
             --exclude-module bisect --exclude-module calendar `
             --exclude-module configparser --exclude-module getopt `
             --exclude-module argparse --exclude-module platform `

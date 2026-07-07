@@ -1,8 +1,8 @@
 {
-  "version": "1.3.0",
+  "version": "1.3.1",
   "release_date": "2026-07-07",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.0/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.0/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.0/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.3.0 — 移除 OpenSSL：ssl stub + WinHTTP + 删除 libcrypto/libssl DLL"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.1/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.1/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.1/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.3.1 — 进一步减小：排除 lzma/bz2 + 激进 tk/tcl 清理 + 删除 dist-info"
 }
