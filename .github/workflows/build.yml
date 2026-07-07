@@ -159,7 +159,7 @@ jobs:
 
           # --- 清理 tk/tcl 非必要数据文件 ---
           Write-Host "`nCleaning tk/tcl data files..."
-          $tclDirs = Get-ChildItem -Path "dist\ConnectHub-Client\_internal" -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^(tcl|tk)" -or $_.Name -eq "_tk_data" }
+          $tclDirs = Get-ChildItem -Path "dist\ConnectHub-Client\_internal" -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^(tcl|tk|_tcl|_tk)" }
           foreach ($dir in $tclDirs) {
             # 删除 demos 目录
             Get-ChildItem -Path $dir.FullName -Recurse -Directory -Filter "demos" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
@@ -280,15 +280,24 @@ jobs:
 
           # --- 清理 tk/tcl 非必要数据文件 (server 不依赖 tkinter，但 PyInstaller 可能仍包含) ---
           Write-Host "`nCleaning tk/tcl data files for server..."
-          $tclDirs = Get-ChildItem -Path "dist\ConnectHub-Server\_internal" -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^(tcl|tk)" -or $_.Name -eq "_tk_data" }
+          $tclDirs = Get-ChildItem -Path "dist\ConnectHub-Server\_internal" -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^(tcl|tk|_tcl|_tk)" }
           foreach ($dir in $tclDirs) {
             Get-ChildItem -Path $dir.FullName -Recurse -Directory -Filter "demos" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
             if (Test-Path "$($dir.FullName)\msgs") {
               Get-ChildItem -Path "$($dir.FullName)\msgs" -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch "^en" } | Remove-Item -Force -ErrorAction SilentlyContinue
             }
             Get-ChildItem -Path $dir.FullName -Recurse -File -Include "*.gif","*.png" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "logo|pwrd|flag|teapot|nose|ouster" } | Remove-Item -Force -ErrorAction SilentlyContinue
+            if (Test-Path "$($dir.FullName)\encoding") {
+              $keepEnc = @("ascii.enc","cp1252.enc","cp936.enc","iso8859-1.enc","utf-8.enc")
+              Get-ChildItem -Path "$($dir.FullName)\encoding" -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin $keepEnc } | Remove-Item -Force -ErrorAction SilentlyContinue
+            }
+            Get-ChildItem -Path $dir.FullName -Recurse -Directory -Filter "http1.0" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            Get-ChildItem -Path $dir.FullName -Recurse -Directory -Filter "opt0.4" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
           }
           Get-ChildItem -Path "dist\ConnectHub-Server\_internal" -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^test_|_test\.py$|test_.*\.py$" } | Remove-Item -Force -ErrorAction SilentlyContinue
+
+          Write-Host "`n=== _tcl_data / _tk_data / tcl8 subdir sizes (server) ==="
+          Get-ChildItem -Path "dist\ConnectHub-Server\_internal" -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^(tcl|tk|_tcl|_tk)" } | ForEach-Object { $size = (Get-ChildItem -Path $_.FullName -Recurse -File | Measure-Object -Property Length -Sum).Sum; $mb = [math]::Round($size / 1MB, 2); Write-Host "  $($_.FullName.Replace('dist\ConnectHub-Server\_internal\','')): $mb MB" }
 
           $serverSizeAfter = [math]::Round((Get-ChildItem -Path "dist\ConnectHub-Server" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
           Write-Host "Server folder after cleanup: $serverSizeAfter MB"
