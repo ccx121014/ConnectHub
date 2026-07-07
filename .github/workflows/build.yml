@@ -210,9 +210,9 @@ jobs:
           foreach ($f in @("ConnectHub-Setup.exe","ConnectHub-Client.zip","ConnectHub-Server.zip")) {
             if (Test-Path $f) {
               $size = [math]::Round((Get-Item $f).Length / 1MB, 2)
-              Write-Host "  $f: $size MB"
+              Write-Host ("  {0}: {1} MB" -f $f, $size)
             } else {
-              Write-Host "  $f: NOT FOUND"
+              Write-Host ("  {0}: NOT FOUND" -f $f)
             }
           }
 

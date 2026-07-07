@@ -1,8 +1,8 @@
 {
-  "version": "1.1.9",
+  "version": "1.2.0",
   "release_date": "2026-07-07",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.9/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.9/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.9/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.1.9 — 重写 Create Release 步骤（先 view 再 create/upload --clobber）"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.2.0/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.2.0/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.2.0/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.2.0 — onedir + UPX ultra-brute（修复 PowerShell $f: 解析错误）"
 }
