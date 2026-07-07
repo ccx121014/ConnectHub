@@ -197,25 +197,53 @@ jobs:
       - name: Create Release
         shell: pwsh
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "${{ github.ref_name }}"
-          $fileArgs = @()
+          Write-Host "Tag: $tag"
+          Write-Host "gh version:"
+          gh --version
+
+          # List built files
+          Write-Host "`nBuilt files:"
           foreach ($f in @("ConnectHub-Setup.exe","ConnectHub-Client.zip","ConnectHub-Server.zip")) {
             if (Test-Path $f) {
               $size = [math]::Round((Get-Item $f).Length / 1MB, 2)
               Write-Host "  $f: $size MB"
-              $fileArgs += $f
+            } else {
+              Write-Host "  $f: NOT FOUND"
             }
           }
-          # Try create; if release already exists, upload assets to it instead
-          & gh release create $tag @fileArgs --title "ConnectHub $tag" --notes "ConnectHub $tag" 2>&1 | Write-Host
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "Release may already exist — uploading assets to existing release..."
-            & gh release upload $tag @fileArgs --clobber 2>&1 | Write-Host
+
+          # Check if release already exists
+          $releaseExists = $false
+          gh release view $tag 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $releaseExists = $true
+            Write-Host "`nRelease already exists for $tag"
+          } else {
+            Write-Host "`nCreating new release for $tag..."
+            gh release create $tag --title "ConnectHub $tag" --notes "ConnectHub $tag"
             if ($LASTEXITCODE -ne 0) {
-              Write-Host "Upload also failed"
-              exit 1
+              Write-Host "gh release create failed with exit code $LASTEXITCODE"
+              Write-Host "Trying with --generate-notes..."
+              gh release create $tag --title "ConnectHub $tag" --generate-notes
+              if ($LASTEXITCODE -ne 0) {
+                Write-Host "gh release create still failed. Exit."
+                exit 1
+              }
             }
           }
-          Write-Host "Release assets uploaded successfully"
+
+          # Upload files to the release
+          foreach ($f in @("ConnectHub-Setup.exe","ConnectHub-Client.zip","ConnectHub-Server.zip")) {
+            if (Test-Path $f) {
+              Write-Host "Uploading $f..."
+              gh release upload $tag $f --clobber
+              if ($LASTEXITCODE -ne 0) {
+                Write-Host "  Upload of $f failed (exit $LASTEXITCODE) — continuing"
+              }
+            }
+          }
+          Write-Host "`nRelease step complete."
