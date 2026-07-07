@@ -1,8 +1,8 @@
 {
-  "version": "1.1.1",
+  "version": "1.1.2",
   "release_date": "2026-07-07",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.1/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.1/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.1/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.1.1 — 深度体积优化，移除 Pillow 依赖，客户端大幅减小"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.2/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.2/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.2/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.1.2 — 使用 Nuitka 编译器，客户端体积进一步减小"
 }
