@@ -39,9 +39,9 @@ jobs:
         run: |
           # -OO strips docstrings & asserts from bytecode -> smaller .pyc payload
           # --onedir: produces a folder (better per-file UPX + InnoSetup solid LZMA2)
+          # No --upx-dir: PyInstaller won't UPX; we do it manually with ultra-brute below
           python -OO -m PyInstaller --noconfirm --clean `
             --onedir --windowed --strip `
-            --upx-dir "$env:UPX_DIR" `
             --paths . --paths client `
             --add-data "protocol;protocol" `
             --add-data "version.json;." `
@@ -98,15 +98,18 @@ jobs:
             Write-Host "Client build FAILED"
             exit 1
           }
-          # UPX --ultra-brute on every .dll/.pyd in the onedir folder
-          # (PyInstaller's --upx-dir uses UPX default level; ultra-brute tries all methods)
+          # UPX --ultra-brute on every .dll/.pyd in the onedir folder.
+          # Files are uncompressed (no --upx-dir above), so UPX compresses from scratch.
+          # Reset $LASTEXITCODE after loop — UPX may return non-zero for files it can't shrink.
+          $upxExe = "$env:UPX_DIR\upx.exe"
           Get-ChildItem -Path "dist\ConnectHub-Client" -Recurse -Include "*.dll","*.pyd" | ForEach-Object {
-            try {
-              & "$env:UPX_DIR\upx.exe" --ultra-brute --force $_.FullName 2>&1 | Write-Host
-            } catch {
-              Write-Host "UPX skip: $($_.Name) - $_"
-            }
+            $before = $_.Length
+            & $upxExe --ultra-brute --force $_.FullName 2>&1 | Out-Null
+            $after = (Get-Item $_.FullName).Length
+            $pct = if ($before -gt 0) { [math]::Round((1 - $after/$before) * 100, 1) } else { 0 }
+            Write-Host "  UPX: $($_.Name)  $([math]::Round($before/1KB))KB -> $([math]::Round($after/1KB))KB (-$pct%)"
           }
+          $LASTEXITCODE = 0
           $clientSize = [math]::Round((Get-ChildItem -Path "dist\ConnectHub-Client" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
           Write-Host "Client folder total: $clientSize MB"
 
@@ -115,7 +118,6 @@ jobs:
         run: |
           python -OO -m PyInstaller --noconfirm --clean `
             --onedir --console --strip `
-            --upx-dir "$env:UPX_DIR" `
             --paths . --paths server `
             --add-data "protocol;protocol" `
             --add-data "version.json;." `
@@ -140,13 +142,15 @@ jobs:
             Write-Host "Server build FAILED"
             exit 1
           }
+          $upxExe = "$env:UPX_DIR\upx.exe"
           Get-ChildItem -Path "dist\ConnectHub-Server" -Recurse -Include "*.dll","*.pyd" | ForEach-Object {
-            try {
-              & "$env:UPX_DIR\upx.exe" --ultra-brute --force $_.FullName 2>&1 | Write-Host
-            } catch {
-              Write-Host "UPX skip: $($_.Name) - $_"
-            }
+            $before = $_.Length
+            & $upxExe --ultra-brute --force $_.FullName 2>&1 | Out-Null
+            $after = (Get-Item $_.FullName).Length
+            $pct = if ($before -gt 0) { [math]::Round((1 - $after/$before) * 100, 1) } else { 0 }
+            Write-Host "  UPX: $($_.Name)  $([math]::Round($before/1KB))KB -> $([math]::Round($after/1KB))KB (-$pct%)"
           }
+          $LASTEXITCODE = 0
           $serverSize = [math]::Round((Get-ChildItem -Path "dist\ConnectHub-Server" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
           Write-Host "Server folder total: $serverSize MB"
 
@@ -161,6 +165,7 @@ jobs:
           Write-Host "Using 7z at: $7z"
           & $7z a -t7z -mx=9 -ms=on "ConnectHub-Client.zip" "dist\ConnectHub-Client\*"
           & $7z a -t7z -mx=9 -ms=on "ConnectHub-Server.zip" "dist\ConnectHub-Server\*"
+          $LASTEXITCODE = 0
           $cs = [math]::Round((Get-Item "ConnectHub-Client.zip").Length / 1MB, 2)
           $ss = [math]::Round((Get-Item "ConnectHub-Server.zip").Length / 1MB, 2)
           Write-Host "Client.zip: $cs MB"

@@ -1,8 +1,8 @@
 {
-  "version": "1.1.6",
+  "version": "1.1.7",
   "release_date": "2026-07-07",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.6/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.6/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.6/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.1.6 — 切换 onedir 模式 + UPX ultra-brute + 7z/InnoSetup LZMA2，大幅减小下载体积"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.7/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.7/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.7/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.1.7 — onedir + UPX ultra-brute + 7z/InnoSetup LZMA2（修复 v1.1.6 构建失败）"
 }
