@@ -92,6 +92,21 @@ jobs:
             --exclude-module reprlib --exclude-module shlex `
             --exclude-module code `
             --exclude-module codeop --exclude-module textwrap `
+            --exclude-module ast --exclude-module dis `
+            --exclude-module pickletools --exclude-module shelve `
+            --exclude-module socketserver --exclude-module tty `
+            --exclude-module quopri --exclude-module uu `
+            --exclude-module binhex --exclude-module xdrlib `
+            --exclude-module cmd --exclude-module trace `
+            --exclude-module tracemalloc --exclude-module cProfile `
+            --exclude-module asyncore --exclude-module asynchat `
+            --exclude-module sunau --exclude-module aifc `
+            --exclude-module chunk --exclude-module colorsys `
+            --exclude-module wsgiref --exclude-module zoneinfo `
+            --exclude-module rlcompleter --exclude-module readline `
+            --exclude-module py_compile --exclude-module modulefinder `
+            --exclude-module symtable --exclude-module token `
+            --exclude-module tokenize `
             --name ConnectHub-Client `
             client/app.py
           if ($LASTEXITCODE -ne 0) {
@@ -112,6 +127,31 @@ jobs:
           $LASTEXITCODE = 0
           $clientSize = [math]::Round((Get-ChildItem -Path "dist\ConnectHub-Client" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
           Write-Host "Client folder total: $clientSize MB"
+
+          # --- 清理 tk/tcl 非必要数据文件 ---
+          Write-Host "`nCleaning tk/tcl data files..."
+          $tclDirs = Get-ChildItem -Path "dist\ConnectHub-Client\_internal" -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^(tcl|tk)" -or $_.Name -eq "_tk_data" }
+          foreach ($dir in $tclDirs) {
+            # 删除 demos 目录
+            Get-ChildItem -Path $dir.FullName -Recurse -Directory -Filter "demos" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            # 删除非英文消息文件
+            if (Test-Path "$($dir.FullName)\msgs") {
+              Get-ChildItem -Path "$($dir.FullName)\msgs" -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch "^en" } | Remove-Item -Force -ErrorAction SilentlyContinue
+            }
+            # 删除示例图片
+            Get-ChildItem -Path $dir.FullName -Recurse -File -Include "*.gif","*.png" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "logo|pwrd|flag|teapot|nose|ouster" } | Remove-Item -Force -ErrorAction SilentlyContinue
+          }
+          # 删除 _internal 中已知的测试/示例文件
+          Get-ChildItem -Path "dist\ConnectHub-Client\_internal" -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^test_|_test\.py$|test_.*\.py$" } | Remove-Item -Force -ErrorAction SilentlyContinue
+
+          # --- 文件大小分析 ---
+          Write-Host "`n=== Top 20 largest files in _internal ==="
+          Get-ChildItem -Path "dist\ConnectHub-Client\_internal" -Recurse -File -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 20 | ForEach-Object { $mb = [math]::Round($_.Length / 1MB, 2); Write-Host "  $($_.Name): $mb MB" }
+          Write-Host "`n=== Directory sizes in _internal ==="
+          Get-ChildItem -Path "dist\ConnectHub-Client\_internal" -Directory -ErrorAction SilentlyContinue | ForEach-Object { $size = (Get-ChildItem -Path $_.FullName -Recurse -File | Measure-Object -Property Length -Sum).Sum; $mb = [math]::Round($size / 1MB, 2); Write-Host "  $($_.Name): $mb MB" }
+
+          $clientSizeAfter = [math]::Round((Get-ChildItem -Path "dist\ConnectHub-Client" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
+          Write-Host "Client folder after cleanup: $clientSizeAfter MB"
 
       - name: Build Server (onedir + UPX ultra-brute)
         shell: pwsh
@@ -136,6 +176,21 @@ jobs:
             --exclude-module distutils --exclude-module setuptools `
             --exclude-module unicodedata --exclude-module pyexpat `
             --exclude-module xml --exclude-module email `
+            --exclude-module ast --exclude-module dis `
+            --exclude-module pickletools --exclude-module shelve `
+            --exclude-module socketserver --exclude-module tty `
+            --exclude-module quopri --exclude-module uu `
+            --exclude-module binhex --exclude-module xdrlib `
+            --exclude-module cmd --exclude-module trace `
+            --exclude-module tracemalloc --exclude-module cProfile `
+            --exclude-module asyncore --exclude-module asynchat `
+            --exclude-module sunau --exclude-module aifc `
+            --exclude-module chunk --exclude-module colorsys `
+            --exclude-module wsgiref --exclude-module zoneinfo `
+            --exclude-module rlcompleter --exclude-module readline `
+            --exclude-module py_compile --exclude-module modulefinder `
+            --exclude-module symtable --exclude-module token `
+            --exclude-module tokenize `
             --name ConnectHub-Server `
             server/main.py
           if ($LASTEXITCODE -ne 0) {
@@ -153,6 +208,21 @@ jobs:
           $LASTEXITCODE = 0
           $serverSize = [math]::Round((Get-ChildItem -Path "dist\ConnectHub-Server" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
           Write-Host "Server folder total: $serverSize MB"
+
+          # --- 清理 tk/tcl 非必要数据文件 (server 不依赖 tkinter，但 PyInstaller 可能仍包含) ---
+          Write-Host "`nCleaning tk/tcl data files for server..."
+          $tclDirs = Get-ChildItem -Path "dist\ConnectHub-Server\_internal" -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^(tcl|tk)" -or $_.Name -eq "_tk_data" }
+          foreach ($dir in $tclDirs) {
+            Get-ChildItem -Path $dir.FullName -Recurse -Directory -Filter "demos" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path "$($dir.FullName)\msgs") {
+              Get-ChildItem -Path "$($dir.FullName)\msgs" -ErrorAction SilentlyContinue | Where-Object { $_.Name -notmatch "^en" } | Remove-Item -Force -ErrorAction SilentlyContinue
+            }
+            Get-ChildItem -Path $dir.FullName -Recurse -File -Include "*.gif","*.png" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "logo|pwrd|flag|teapot|nose|ouster" } | Remove-Item -Force -ErrorAction SilentlyContinue
+          }
+          Get-ChildItem -Path "dist\ConnectHub-Server\_internal" -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^test_|_test\.py$|test_.*\.py$" } | Remove-Item -Force -ErrorAction SilentlyContinue
+
+          $serverSizeAfter = [math]::Round((Get-ChildItem -Path "dist\ConnectHub-Server" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
+          Write-Host "Server folder after cleanup: $serverSizeAfter MB"
 
       - name: Create portable zips (7z LZMA2 max)
         shell: pwsh
