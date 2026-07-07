@@ -208,5 +208,14 @@ jobs:
               $fileArgs += $f
             }
           }
-          & gh release create $tag @fileArgs --title "ConnectHub $tag" --notes "ConnectHub $tag"
-          Write-Host "Release created, exit code: $LASTEXITCODE"
+          # Try create; if release already exists, upload assets to it instead
+          & gh release create $tag @fileArgs --title "ConnectHub $tag" --notes "ConnectHub $tag" 2>&1 | Write-Host
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Release may already exist — uploading assets to existing release..."
+            & gh release upload $tag @fileArgs --clobber 2>&1 | Write-Host
+            if ($LASTEXITCODE -ne 0) {
+              Write-Host "Upload also failed"
+              exit 1
+            }
+          }
+          Write-Host "Release assets uploaded successfully"
