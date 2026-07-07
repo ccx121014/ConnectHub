@@ -107,6 +107,35 @@ jobs:
             --exclude-module py_compile --exclude-module modulefinder `
             --exclude-module symtable --exclude-module token `
             --exclude-module tokenize `
+            --exclude-module bisect --exclude-module calendar `
+            --exclude-module configparser --exclude-module getopt `
+            --exclude-module argparse --exclude-module platform `
+            --exclude-module sysconfig --exclude-module pkgutil `
+            --exclude-module importlib.machinery --exclude-module importlib.util `
+            --exclude-module encodings.big5 --exclude-module encodings.big5hkscs `
+            --exclude-module encodings.cp932 --exclude-module encodings.cp949 `
+            --exclude-module encodings.cp950 --exclude-module encodings.euc_jis_2004 `
+            --exclude-module encodings.euc_jisx0213 --exclude-module encodings.euc_jp `
+            --exclude-module encodings.euc_kr --exclude-module encodings.gb18030 `
+            --exclude-module encodings.gb2312 --exclude-module encodings.gbk `
+            --exclude-module encodings.hz --exclude-module encodings.iso2022_jp `
+            --exclude-module encodings.iso2022_jp_1 --exclude-module encodings.iso2022_jp_2 `
+            --exclude-module encodings.iso2022_jp_2004 --exclude-module encodings.iso2022_jp_3 `
+            --exclude-module encodings.iso2022_jp_ext --exclude-module encodings.iso2022_kr `
+            --exclude-module encodings.iso8859_2 --exclude-module encodings.iso8859_3 `
+            --exclude-module encodings.iso8859_4 --exclude-module encodings.iso8859_5 `
+            --exclude-module encodings.iso8859_6 --exclude-module encodings.iso8859_7 `
+            --exclude-module encodings.iso8859_8 --exclude-module encodings.iso8859_9 `
+            --exclude-module encodings.iso8859_10 --exclude-module encodings.iso8859_11 `
+            --exclude-module encodings.iso8859_13 --exclude-module encodings.iso8859_14 `
+            --exclude-module encodings.iso8859_15 --exclude-module encodings.iso8859_16 `
+            --exclude-module encodings.johab --exclude-module encodings.koi8_r `
+            --exclude-module encodings.koi8_t --exclude-module encodings.koi8_u `
+            --exclude-module encodings.mac_cyrillic --exclude-module encodings.mac_greek `
+            --exclude-module encodings.mac_iceland --exclude-module encodings.mac_latin2 `
+            --exclude-module encodings.mac_roman --exclude-module encodings.mac_turkish `
+            --exclude-module encodings.ptcp154 --exclude-module encodings.shift_jis `
+            --exclude-module encodings.shift_jis_2004 --exclude-module encodings.shift_jisx0213 `
             --name ConnectHub-Client `
             client/app.py
           if ($LASTEXITCODE -ne 0) {
@@ -140,6 +169,14 @@ jobs:
             }
             # 删除示例图片
             Get-ChildItem -Path $dir.FullName -Recurse -File -Include "*.gif","*.png" -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "logo|pwrd|flag|teapot|nose|ouster" } | Remove-Item -Force -ErrorAction SilentlyContinue
+            # 删除 tcl encoding/ 中除核心编码外的文件
+            if (Test-Path "$($dir.FullName)\encoding") {
+              $keepEnc = @("ascii.enc","cp1252.enc","cp936.enc","iso8859-1.enc","utf-8.enc")
+              Get-ChildItem -Path "$($dir.FullName)\encoding" -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -notin $keepEnc } | Remove-Item -Force -ErrorAction SilentlyContinue
+            }
+            # 删除 http1.0 和 opt0.4 目录
+            Get-ChildItem -Path $dir.FullName -Recurse -Directory -Filter "http1.0" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            Get-ChildItem -Path $dir.FullName -Recurse -Directory -Filter "opt0.4" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
           }
           # 删除 _internal 中已知的测试/示例文件
           Get-ChildItem -Path "dist\ConnectHub-Client\_internal" -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^test_|_test\.py$|test_.*\.py$" } | Remove-Item -Force -ErrorAction SilentlyContinue
@@ -149,6 +186,9 @@ jobs:
           Get-ChildItem -Path "dist\ConnectHub-Client\_internal" -Recurse -File -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 20 | ForEach-Object { $mb = [math]::Round($_.Length / 1MB, 2); Write-Host "  $($_.Name): $mb MB" }
           Write-Host "`n=== Directory sizes in _internal ==="
           Get-ChildItem -Path "dist\ConnectHub-Client\_internal" -Directory -ErrorAction SilentlyContinue | ForEach-Object { $size = (Get-ChildItem -Path $_.FullName -Recurse -File | Measure-Object -Property Length -Sum).Sum; $mb = [math]::Round($size / 1MB, 2); Write-Host "  $($_.Name): $mb MB" }
+          # _tcl_data / _tk_data 详细分析
+          Write-Host "`n=== _tcl_data / _tk_data / tcl8 subdir sizes ==="
+          Get-ChildItem -Path "dist\ConnectHub-Client\_internal" -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^(tcl|tk|_tk_data|_tcl_data)" } | ForEach-Object { $size = (Get-ChildItem -Path $_.FullName -Recurse -File | Measure-Object -Property Length -Sum).Sum; $mb = [math]::Round($size / 1MB, 2); Write-Host "  $($_.FullName.Replace('dist\ConnectHub-Client\_internal\','')): $mb MB" }
 
           $clientSizeAfter = [math]::Round((Get-ChildItem -Path "dist\ConnectHub-Client" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
           Write-Host "Client folder after cleanup: $clientSizeAfter MB"
@@ -191,6 +231,35 @@ jobs:
             --exclude-module py_compile --exclude-module modulefinder `
             --exclude-module symtable --exclude-module token `
             --exclude-module tokenize `
+            --exclude-module bisect --exclude-module calendar `
+            --exclude-module configparser --exclude-module getopt `
+            --exclude-module argparse --exclude-module platform `
+            --exclude-module sysconfig --exclude-module pkgutil `
+            --exclude-module importlib.machinery --exclude-module importlib.util `
+            --exclude-module encodings.big5 --exclude-module encodings.big5hkscs `
+            --exclude-module encodings.cp932 --exclude-module encodings.cp949 `
+            --exclude-module encodings.cp950 --exclude-module encodings.euc_jis_2004 `
+            --exclude-module encodings.euc_jisx0213 --exclude-module encodings.euc_jp `
+            --exclude-module encodings.euc_kr --exclude-module encodings.gb18030 `
+            --exclude-module encodings.gb2312 --exclude-module encodings.gbk `
+            --exclude-module encodings.hz --exclude-module encodings.iso2022_jp `
+            --exclude-module encodings.iso2022_jp_1 --exclude-module encodings.iso2022_jp_2 `
+            --exclude-module encodings.iso2022_jp_2004 --exclude-module encodings.iso2022_jp_3 `
+            --exclude-module encodings.iso2022_jp_ext --exclude-module encodings.iso2022_kr `
+            --exclude-module encodings.iso8859_2 --exclude-module encodings.iso8859_3 `
+            --exclude-module encodings.iso8859_4 --exclude-module encodings.iso8859_5 `
+            --exclude-module encodings.iso8859_6 --exclude-module encodings.iso8859_7 `
+            --exclude-module encodings.iso8859_8 --exclude-module encodings.iso8859_9 `
+            --exclude-module encodings.iso8859_10 --exclude-module encodings.iso8859_11 `
+            --exclude-module encodings.iso8859_13 --exclude-module encodings.iso8859_14 `
+            --exclude-module encodings.iso8859_15 --exclude-module encodings.iso8859_16 `
+            --exclude-module encodings.johab --exclude-module encodings.koi8_r `
+            --exclude-module encodings.koi8_t --exclude-module encodings.koi8_u `
+            --exclude-module encodings.mac_cyrillic --exclude-module encodings.mac_greek `
+            --exclude-module encodings.mac_iceland --exclude-module encodings.mac_latin2 `
+            --exclude-module encodings.mac_roman --exclude-module encodings.mac_turkish `
+            --exclude-module encodings.ptcp154 --exclude-module encodings.shift_jis `
+            --exclude-module encodings.shift_jis_2004 --exclude-module encodings.shift_jisx0213 `
             --name ConnectHub-Server `
             server/main.py
           if ($LASTEXITCODE -ne 0) {

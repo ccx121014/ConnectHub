@@ -1,8 +1,8 @@
 {
-  "version": "1.2.3",
+  "version": "1.2.4",
   "release_date": "2026-07-07",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.2.3/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.2.3/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.2.3/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.2.3 — 增加 28 个模块排除 + tk/tcl 数据清理 + 文件大小分析"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.2.4/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.2.4/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.2.4/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.2.4 — 进一步减小：encodings清理 + tk/tcl encoding/http1.0/opt0.4删除 + 更多模块排除"
 }
