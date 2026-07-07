@@ -1,8 +1,8 @@
 {
-  "version": "1.1.4",
+  "version": "1.1.5",
   "release_date": "2026-07-07",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.4/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.4/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.4/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.1.4 — 升级到 Python 3.13，stdlib 更小"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.5/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.5/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.5/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.1.5 — 回退到 Python 3.12（3.13 运行时更大）"
 }
