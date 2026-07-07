@@ -34,12 +34,13 @@ jobs:
           echo "UPX_DIR=$upxDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           & "$upxDir\upx.exe" --version
 
-      - name: Build Client (PyInstaller -OO + ultra-exclude + UPX)
+      - name: Build Client (PyInstaller -OO onedir + ultra-exclude)
         shell: pwsh
         run: |
           # -OO strips docstrings & asserts from bytecode -> smaller .pyc payload
+          # --onedir: produces a folder (better per-file UPX + InnoSetup solid LZMA2)
           python -OO -m PyInstaller --noconfirm --clean `
-            --onefile --windowed --strip `
+            --onedir --windowed --strip `
             --upx-dir "$env:UPX_DIR" `
             --paths . --paths client `
             --add-data "protocol;protocol" `
@@ -97,21 +98,23 @@ jobs:
             Write-Host "Client build FAILED"
             exit 1
           }
-          # Run UPX --ultra-brute on the final onefile exe for max compression
-          # (non-fatal: if UPX refuses, keep the PyInstaller-built exe)
-          try {
-            & "$env:UPX_DIR\upx.exe" --ultra-brute --force "dist\ConnectHub-Client.exe" 2>&1 | Write-Host
-          } catch {
-            Write-Host "UPX step skipped: $_"
+          # UPX --ultra-brute on every .dll/.pyd in the onedir folder
+          # (PyInstaller's --upx-dir uses UPX default level; ultra-brute tries all methods)
+          Get-ChildItem -Path "dist\ConnectHub-Client" -Recurse -Include "*.dll","*.pyd" | ForEach-Object {
+            try {
+              & "$env:UPX_DIR\upx.exe" --ultra-brute --force $_.FullName 2>&1 | Write-Host
+            } catch {
+              Write-Host "UPX skip: $($_.Name) - $_"
+            }
           }
-          $size = [math]::Round((Get-Item "dist\ConnectHub-Client.exe").Length / 1MB, 2)
-          Write-Host "Client: $size MB"
+          $clientSize = [math]::Round((Get-ChildItem -Path "dist\ConnectHub-Client" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
+          Write-Host "Client folder total: $clientSize MB"
 
-      - name: Build Server (onefile + UPX)
+      - name: Build Server (onedir + UPX ultra-brute)
         shell: pwsh
         run: |
-          pyinstaller --noconfirm --clean `
-            --onefile --console --strip `
+          python -OO -m PyInstaller --noconfirm --clean `
+            --onedir --console --strip `
             --upx-dir "$env:UPX_DIR" `
             --paths . --paths server `
             --add-data "protocol;protocol" `
@@ -137,8 +140,31 @@ jobs:
             Write-Host "Server build FAILED"
             exit 1
           }
-          $size = [math]::Round((Get-Item "dist\ConnectHub-Server.exe").Length / 1MB, 2)
-          Write-Host "Server: $size MB"
+          Get-ChildItem -Path "dist\ConnectHub-Server" -Recurse -Include "*.dll","*.pyd" | ForEach-Object {
+            try {
+              & "$env:UPX_DIR\upx.exe" --ultra-brute --force $_.FullName 2>&1 | Write-Host
+            } catch {
+              Write-Host "UPX skip: $($_.Name) - $_"
+            }
+          }
+          $serverSize = [math]::Round((Get-ChildItem -Path "dist\ConnectHub-Server" -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
+          Write-Host "Server folder total: $serverSize MB"
+
+      - name: Create portable zips (7z LZMA2 max)
+        shell: pwsh
+        run: |
+          choco install 7zip -y --no-progress
+          $7z = "C:\Program Files\7-Zip\7z.exe"
+          if (-not (Test-Path $7z)) {
+            $7z = Get-ChildItem -Path "C:\" -Filter "7z.exe" -Recurse -ErrorAction SilentlyContinue -Depth 4 | Select-Object -First 1 -ExpandProperty FullName
+          }
+          Write-Host "Using 7z at: $7z"
+          & $7z a -t7z -mx=9 -ms=on "ConnectHub-Client.zip" "dist\ConnectHub-Client\*"
+          & $7z a -t7z -mx=9 -ms=on "ConnectHub-Server.zip" "dist\ConnectHub-Server\*"
+          $cs = [math]::Round((Get-Item "ConnectHub-Client.zip").Length / 1MB, 2)
+          $ss = [math]::Round((Get-Item "ConnectHub-Server.zip").Length / 1MB, 2)
+          Write-Host "Client.zip: $cs MB"
+          Write-Host "Server.zip: $ss MB"
 
       - name: Build installer with InnoSetup
         shell: pwsh
@@ -170,20 +196,12 @@ jobs:
         run: |
           $tag = "${{ github.ref_name }}"
           $fileArgs = @()
-          if (Test-Path "dist\ConnectHub-Client.exe") {
-            $size = [math]::Round((Get-Item "dist\ConnectHub-Client.exe").Length / 1MB, 2)
-            Write-Host "  ConnectHub-Client.exe: $size MB"
-            $fileArgs += "dist\ConnectHub-Client.exe"
-          }
-          if (Test-Path "dist\ConnectHub-Server.exe") {
-            $size = [math]::Round((Get-Item "dist\ConnectHub-Server.exe").Length / 1MB, 2)
-            Write-Host "  ConnectHub-Server.exe: $size MB"
-            $fileArgs += "dist\ConnectHub-Server.exe"
-          }
-          if (Test-Path "ConnectHub-Setup.exe") {
-            $size = [math]::Round((Get-Item "ConnectHub-Setup.exe").Length / 1MB, 2)
-            Write-Host "  ConnectHub-Setup.exe: $size MB"
-            $fileArgs += "ConnectHub-Setup.exe"
+          foreach ($f in @("ConnectHub-Setup.exe","ConnectHub-Client.zip","ConnectHub-Server.zip")) {
+            if (Test-Path $f) {
+              $size = [math]::Round((Get-Item $f).Length / 1MB, 2)
+              Write-Host "  $f: $size MB"
+              $fileArgs += $f
+            }
           }
           & gh release create $tag @fileArgs --title "ConnectHub $tag" --notes "ConnectHub $tag"
           Write-Host "Release created, exit code: $LASTEXITCODE"

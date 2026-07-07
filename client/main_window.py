@@ -45,14 +45,21 @@ logger = logging.getLogger(__name__)
 # =============================================================
 
 def _load_version_info() -> Dict[str, Any]:
-    """从项目根的 version.json 读取版本信息。"""
-    path = _project_root / "version.json"
-    try:
-        if path.exists():
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-    except Exception as exc:
-        logger.warning(f"读取 version.json 失败: {exc}")
+    """从 version.json 读取版本信息（兼容 onefile / onedir / 源码运行）。"""
+    candidates = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(Path(meipass) / "version.json")
+    candidates.append(_project_root / "version.json")
+    if getattr(sys, "frozen", False):
+        candidates.append(Path(sys.executable).parent / "version.json")
+    for path in candidates:
+        try:
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+        except Exception as exc:
+            logger.warning(f"读取 {path} 失败: {exc}")
     return {"version": "0.0.0", "repo_owner": "ccx121014", "repo_name": "ConnectHub"}
 
 

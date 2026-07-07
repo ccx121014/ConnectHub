@@ -31,6 +31,26 @@ _DEFAULT_VERSION = "0.0.0"
 _API_TIMEOUT = 10
 
 
+def _find_version_json() -> Path:
+    """查找 version.json：兼容 PyInstaller onefile / onedir / 源码运行。"""
+    # PyInstaller 打包后：sys._MEIPASS 指向 bundle 目录
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        p = Path(meipass) / "version.json"
+        if p.exists():
+            return p
+    # 源码运行
+    p = _project_root / "version.json"
+    if p.exists():
+        return p
+    # onedir 模式：exe 同级目录
+    if getattr(sys, "frozen", False):
+        p = Path(sys.executable).parent / "version.json"
+        if p.exists():
+            return p
+    return _project_root / "version.json"
+
+
 class Updater:
     """检查 GitHub Releases 上的更新。"""
 
@@ -41,7 +61,7 @@ class Updater:
         """
         self.master = master
         self._version_file: Path = (
-            Path(version_file) if version_file else _project_root / "version.json"
+            Path(version_file) if version_file else _find_version_json()
         )
 
         cfg = self._load_version_config()
