@@ -90,7 +90,7 @@ jobs:
             --exclude-module netrc --exclude-module getpass `
             --exclude-module mimetypes --exclude-module plistlib `
             --exclude-module reprlib --exclude-module shlex `
-            --exclude-module keyword --exclude-module code `
+            --exclude-module code `
             --exclude-module codeop --exclude-module textwrap `
             --name ConnectHub-Client `
             client/app.py
