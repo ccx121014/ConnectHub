@@ -26,8 +26,38 @@ class SSLEOFError(SSLError):
     pass
 
 
+class SSLZeroReturnError(SSLError):
+    pass
+
+
 class CertificateError(Exception):
     pass
+
+
+class MemoryBIO:
+    """Dummy MemoryBIO for asyncio compatibility."""
+
+    def __init__(self):
+        self._buffer = b""
+
+    def read(self, n=-1):
+        if n < 0 or n >= len(self._buffer):
+            result = self._buffer
+            self._buffer = b""
+            return result
+        result = self._buffer[:n]
+        self._buffer = self._buffer[n:]
+        return result
+
+    def write(self, data):
+        self._buffer += data
+        return len(data)
+
+    def pending(self):
+        return len(self._buffer)
+
+    def eof(self):
+        return not self._buffer
 
 
 class SSLSocket:
@@ -61,6 +91,9 @@ class SSLContext:
         raise SSLError("SSL not available in this build")
 
     def wrap_socket(self, sock, *args, **kwargs):
+        raise SSLError("SSL not available in this build")
+
+    def wrap_bio(self, incoming, outgoing, server_side=False, server_hostname=None):
         raise SSLError("SSL not available in this build")
 
 

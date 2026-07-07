@@ -71,6 +71,14 @@ def _winhttp_get(url: str, timeout_ms: int = 10000) -> bytes:
                 raise OSError("WinHttpOpenRequest failed")
 
             try:
+                # 设置超时
+                if timeout_ms > 0:
+                    dw = wintypes.DWORD(timeout_ms)
+                    sz = ctypes.sizeof(dw)
+                    winhttp.WinHttpSetOption(hRequest, 11, ctypes.byref(dw), sz)  # CONNECT
+                    winhttp.WinHttpSetOption(hRequest, 5, ctypes.byref(dw), sz)   # SEND
+                    winhttp.WinHttpSetOption(hRequest, 6, ctypes.byref(dw), sz)   # RECEIVE
+
                 # 添加 Accept header
                 headers = "Accept: application/vnd.github+json\r\n"
                 if not winhttp.WinHttpSendRequest(

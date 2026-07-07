@@ -113,7 +113,6 @@ jobs:
             --exclude-module configparser --exclude-module getopt `
             --exclude-module argparse --exclude-module platform `
             --exclude-module sysconfig --exclude-module pkgutil `
-            --exclude-module importlib.machinery --exclude-module importlib.util `
             --exclude-module ssl --exclude-module _ssl `
             --exclude-module encodings.big5 --exclude-module encodings.big5hkscs `
             --exclude-module encodings.cp932 --exclude-module encodings.cp949 `
@@ -277,7 +276,6 @@ jobs:
             --exclude-module configparser --exclude-module getopt `
             --exclude-module argparse --exclude-module platform `
             --exclude-module sysconfig --exclude-module pkgutil `
-            --exclude-module importlib.machinery --exclude-module importlib.util `
             --exclude-module ssl --exclude-module _ssl `
             --exclude-module encodings.big5 --exclude-module encodings.big5hkscs `
             --exclude-module encodings.cp932 --exclude-module encodings.cp949 `

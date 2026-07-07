@@ -16,7 +16,6 @@ import websockets
 import logging
 import json
 import time
-import sys
 import uuid
 import os
 from pathlib import Path
@@ -275,7 +274,7 @@ class CollaborationServer:
             if target:
                 await self.user_manager.send_to_user(target, message.to_json())
 
-        return sender
+        return current_username
 
     async def _handle_auth_request(
         self,
