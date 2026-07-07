@@ -680,9 +680,8 @@ class MainWindow(ttk.Frame):
         self._ft_manager = FileTransferManager(websocket_client=None,
                                                username=None)
 
-        # 更新器
-        self._updater = Updater(master=self.master,
-                                version_file=str(_project_root / "version.json"))
+        # 更新器（不传 version_file，让 Updater 自动查找）
+        self._updater = Updater(master=self.master)
 
         # UI 组件引用
         self._contact_list: Optional[ContactListWidget] = None

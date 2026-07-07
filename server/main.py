@@ -146,11 +146,11 @@ class CollaborationServer:
                         message_id=None
                     )
                 except Exception as e:
-                    logger.error(f"Error processing message from {sender}: {e}")
+                    logger.error(f"Error processing message from {client_id}: {e}")
                     await self._send_error(
                         websocket,
                         f"Server error: {str(e)}",
-                        message_id=message.message_id if 'message' in dir() else None
+                        message_id=message.message_id if 'message' in locals() else None
                     )
 
         except websockets.exceptions.ConnectionClosed as e:
