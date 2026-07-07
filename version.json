@@ -1,8 +1,8 @@
 {
-  "version": "1.1.0",
-  "release_date": "2026-06-21",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.0/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.0/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.0/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.1.0 — 迁移到 tkinter，去除 PyQt5 依赖，客户端体积显著减小"
+  "version": "1.1.1",
+  "release_date": "2026-07-07",
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.1/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.1/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.1.1/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.1.1 — 深度体积优化，移除 Pillow 依赖，客户端大幅减小"
 }
