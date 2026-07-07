@@ -22,11 +22,10 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install deps + Nuitka + UPX
+      - name: Install deps + UPX
         shell: pwsh
         run: |
-          pip install --upgrade pip websockets nuitka ordered-set zstandard
-          # 下载 UPX
+          pip install --upgrade pip websockets pyinstaller
           $upxUrl = "https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-win64.zip"
           Invoke-WebRequest -Uri $upxUrl -OutFile "$env:TEMP\upx.zip" -UseBasicParsing
           Expand-Archive -Path "$env:TEMP\upx.zip" -DestinationPath "$env:TEMP" -Force
@@ -35,54 +34,65 @@ jobs:
           echo "UPX_DIR=$upxDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           & "$upxDir\upx.exe" --version
 
-      - name: Build Client with Nuitka (onefile + tk-inter)
+      - name: Build Client (PyInstaller onefile + ultra-exclude + UPX)
         shell: pwsh
         run: |
-          python -m nuitka --onefile --standalone --windows-console-mode=disable `
-            --enable-plugin=tk-inter `
-            --include-package=websockets `
-            --include-package=protocol `
-            --include-package=protocol.signals `
-            --include-package=protocol.messages `
-            --include-data-dir=protocol=protocol `
-            --include-data-file=version.json=version.json `
-            --include-data-file=client/config.json=config.json `
-            --nofollow-import-to=unittest --nofollow-import-to=test `
-            --nofollow-import-to=pydoc --nofollow-import-to=pydoc_data `
-            --nofollow-import-to=idlelib --nofollow-import-to=lib2to3 `
-            --nofollow-import-to=distutils --nofollow-import-to=setuptools `
-            --nofollow-import-to=ensurepip --nofollow-import-to=pip `
-            --nofollow-import-to=PIL --nofollow-import-to=numpy `
-            --nofollow-import-to=scipy --nofollow-import-to=matplotlib `
-            --nofollow-import-to=pandas --nofollow-import-to=sqlite3 `
-            --nofollow-import-to=smtpd --nofollow-import-to=poplib `
-            --nofollow-import-to=imaplib --nofollow-import-to=mailbox `
-            --nofollow-import-to=turtle --nofollow-import-to=turtledemo `
-            --nofollow-import-to=crypt --nofollow-import-to=msilib `
-            --nofollow-import-to=audioop --nofollow-import-to=wave `
-            --nofollow-import-to=aifc --nofollow-import-to=sunau `
-            --nofollow-import-to=ossaudiodev --nofollow-import-to=chunk `
-            --nofollow-import-to=telnetlib --nofollow-import-to=ftplib `
-            --nofollow-import-to=nntplib --nofollow-import-to=bdb `
-            --nofollow-import-to=dbm --nofollow-import-to=xmlrpc `
-            --nofollow-import-to=pyexpat --nofollow-import-to=xml `
-            --nofollow-import-to=PyQt5 --nofollow-import-to=tkinter.tix `
-            --nofollow-import-to=tkinter.colorchooser `
-            --lto=yes --remove-output `
-            --output-dir=dist `
-            --output-filename=ConnectHub-Client.exe `
+          pyinstaller --noconfirm --clean `
+            --onefile --windowed --strip `
+            --upx-dir "$env:UPX_DIR" `
+            --paths . --paths client `
+            --add-data "protocol;protocol" `
+            --add-data "version.json;." `
+            --add-data "client/config.json;." `
+            --hidden-import websockets --hidden-import websocket_client `
+            --hidden-import main_window --hidden-import chat_widget `
+            --hidden-import contact_list --hidden-import file_transfer `
+            --hidden-import login_dialog --hidden-import updater `
+            --hidden-import protocol.messages --hidden-import protocol.signals `
+            --hidden-import protocol --hidden-import _tkinter `
+            --exclude-module PyQt5 --exclude-module PyQt5.QtCore `
+            --exclude-module PyQt5.QtGui --exclude-module PyQt5.QtWidgets `
+            --exclude-module PyQt5.QtNetwork `
+            --exclude-module PIL --exclude-module Pillow `
+            --exclude-module numpy --exclude-module scipy `
+            --exclude-module matplotlib --exclude-module pandas `
+            --exclude-module unittest --exclude-module test `
+            --exclude-module pydoc --exclude-module pydoc_data `
+            --exclude-module idlelib --exclude-module lib2to3 `
+            --exclude-module distutils --exclude-module setuptools `
+            --exclude-module ensurepip --exclude-module tkinter.tix `
+            --exclude-module turtledemo --exclude-module turtle `
+            --exclude-module sqlite3 --exclude-module bdb `
+            --exclude-module audioop --exclude-module wave `
+            --exclude-module smtpd --exclude-module poplib `
+            --exclude-module imaplib --exclude-module mailbox `
+            --exclude-module crypt --exclude-module msilib `
+            --exclude-module unicodedata --exclude-module pyexpat `
+            --exclude-module xml --exclude-module xml.dom `
+            --exclude-module xml.etree --exclude-module xml.parsers `
+            --exclude-module xml.sax --exclude-module email `
+            --exclude-module http.server --exclude-module http.cookiejar `
+            --exclude-module http.cookies `
+            --exclude-module ftplib --exclude-module telnetlib `
+            --exclude-module nntplib --exclude-module xmlrpc `
+            --exclude-module tkinter.scrolledtext --exclude-module tkinter.dnd `
+            --exclude-module tkinter.dialog `
+            --exclude-module csv --exclude-module difflib `
+            --exclude-module pprint --exclude-module tabnanny `
+            --exclude-module stringprep --exclude-module compileall `
+            --exclude-module multiprocessing `
+            --name ConnectHub-Client `
             client/app.py
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "Nuitka client build FAILED"
+            Write-Host "Client build FAILED"
             exit 1
           }
           $size = [math]::Round((Get-Item "dist\ConnectHub-Client.exe").Length / 1MB, 2)
-          Write-Host "Client (Nuitka): $size MB"
+          Write-Host "Client: $size MB"
 
-      - name: Build Server (PyInstaller onefile + UPX)
+      - name: Build Server (onefile + UPX)
         shell: pwsh
         run: |
-          pip install pyinstaller
           pyinstaller --noconfirm --clean `
             --onefile --console --strip `
             --upx-dir "$env:UPX_DIR" `
@@ -102,6 +112,8 @@ jobs:
             --exclude-module test --exclude-module pydoc `
             --exclude-module idlelib --exclude-module lib2to3 `
             --exclude-module distutils --exclude-module setuptools `
+            --exclude-module unicodedata --exclude-module pyexpat `
+            --exclude-module xml --exclude-module email `
             --name ConnectHub-Server `
             server/main.py
           if ($LASTEXITCODE -ne 0) {
