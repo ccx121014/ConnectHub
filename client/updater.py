@@ -6,16 +6,17 @@ ConnectHub 自动更新模块（Tkinter 版本）。
 - 版本信息与仓库信息从 /workspace/version.json 读取
 """
 
+import ctypes
 import json
 import logging
 import os
 import sys
 import threading
-import urllib.error
-import urllib.request
 import webbrowser
+from ctypes import wintypes
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 _project_root = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(_project_root))
@@ -29,6 +30,95 @@ _DEFAULT_OWNER = "ccx121014"
 _DEFAULT_REPO = "ConnectHub"
 _DEFAULT_VERSION = "0.0.0"
 _API_TIMEOUT = 10
+
+
+# ---------------------------------------------------------------------------
+# WinHTTP HTTPS GET (绕过 Python ssl/OpenSSL，使用 Windows 原生 TLS)
+# ---------------------------------------------------------------------------
+def _winhttp_get(url: str, timeout_ms: int = 10000) -> bytes:
+    """使用 Windows WinHTTP API 发送 HTTPS GET 请求。"""
+    winhttp = ctypes.windll.winhttp
+
+    hSession = winhttp.WinHttpOpen(
+        f"ConnectHub-Updater/{_DEFAULT_VERSION}",
+        1,  # WINHTTP_ACCESS_TYPE_DEFAULT_PROXY
+        None,
+        None,
+        0,
+    )
+    if not hSession:
+        raise OSError("WinHttpOpen failed")
+
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+        hConnect = winhttp.WinHttpConnect(hSession, host, port, 0)
+        if not hConnect:
+            raise OSError("WinHttpConnect failed")
+
+        try:
+            path = parsed.path or "/"
+            if parsed.query:
+                path += "?" + parsed.query
+
+            flags = 0x00800000 if parsed.scheme == "https" else 0  # WINHTTP_FLAG_SECURE
+            hRequest = winhttp.WinHttpOpenRequest(
+                hConnect, "GET", path, None, None, None, flags
+            )
+            if not hRequest:
+                raise OSError("WinHttpOpenRequest failed")
+
+            try:
+                # 添加 Accept header
+                headers = "Accept: application/vnd.github+json\r\n"
+                if not winhttp.WinHttpSendRequest(
+                    hRequest, headers, len(headers), None, 0, 0, 0
+                ):
+                    raise OSError("WinHttpSendRequest failed")
+
+                if not winhttp.WinHttpReceiveResponse(hRequest, None):
+                    raise OSError("WinHttpReceiveResponse failed")
+
+                # 读取状态码
+                status_code = wintypes.DWORD()
+                status_size = wintypes.DWORD(ctypes.sizeof(status_code))
+                winhttp.WinHttpQueryHeaders(
+                    hRequest,
+                    19,  # WINHTTP_QUERY_STATUS_CODE
+                    None,
+                    ctypes.byref(status_code),
+                    ctypes.byref(status_size),
+                    None,
+                )
+                code = int(status_code.value)
+                if code != 200:
+                    raise OSError(f"HTTP {code}")
+
+                chunks = []
+                while True:
+                    avail = wintypes.DWORD()
+                    if not winhttp.WinHttpQueryDataAvailable(
+                        hRequest, ctypes.byref(avail)
+                    ):
+                        raise OSError("WinHttpQueryDataAvailable failed")
+                    if avail.value == 0:
+                        break
+                    buf = ctypes.create_string_buffer(avail.value)
+                    read = wintypes.DWORD()
+                    if not winhttp.WinHttpReadData(
+                        hRequest, buf, avail.value, ctypes.byref(read)
+                    ):
+                        raise OSError("WinHttpReadData failed")
+                    chunks.append(buf.raw[: read.value])
+                return b"".join(chunks)
+            finally:
+                winhttp.WinHttpCloseHandle(hRequest)
+        finally:
+            winhttp.WinHttpCloseHandle(hConnect)
+    finally:
+        winhttp.WinHttpCloseHandle(hSession)
 
 
 def _find_version_json() -> Path:
@@ -95,27 +185,19 @@ class Updater:
 
     def _fetch_latest_release(self) -> Optional[Dict[str, Any]]:
         url = self._build_latest_api_url()
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": f"ConnectHub-Updater/{self.current_version}",
-                "Accept": "application/vnd.github+json",
-            },
-        )
         try:
-            with urllib.request.urlopen(req, timeout=_API_TIMEOUT) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            # GitHub API 限流通常返回 403
-            if exc.code == 403:
+            raw = _winhttp_get(url, timeout_ms=_API_TIMEOUT * 1000)
+            data = json.loads(raw.decode("utf-8"))
+        except OSError as exc:
+            err = str(exc).lower()
+            if "403" in err or "429" in err:
                 self.update_error.emit("GitHub API 访问频率超限，请稍后再试")
+            elif "http" in err:
+                self.update_error.emit(f"HTTP 错误: {exc}")
             else:
-                self.update_error.emit(f"HTTP 错误: {exc.code}")
+                self.update_error.emit(f"网络错误: {exc}")
             return None
-        except urllib.error.URLError as exc:
-            self.update_error.emit(f"网络错误: {exc.reason}")
-            return None
-        except (OSError, json.JSONDecodeError) as exc:
+        except (json.JSONDecodeError, ValueError) as exc:
             self.update_error.emit(f"无法解析更新信息: {exc}")
             return None
 

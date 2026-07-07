@@ -112,6 +112,7 @@ jobs:
             --exclude-module argparse --exclude-module platform `
             --exclude-module sysconfig --exclude-module pkgutil `
             --exclude-module importlib.machinery --exclude-module importlib.util `
+            --exclude-module ssl --exclude-module _ssl `
             --exclude-module encodings.big5 --exclude-module encodings.big5hkscs `
             --exclude-module encodings.cp932 --exclude-module encodings.cp949 `
             --exclude-module encodings.cp950 --exclude-module encodings.euc_jis_2004 `
@@ -181,6 +182,16 @@ jobs:
           # 删除 _internal 中已知的测试/示例文件
           Get-ChildItem -Path "dist\ConnectHub-Client\_internal" -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^test_|_test\.py$|test_.*\.py$" } | Remove-Item -Force -ErrorAction SilentlyContinue
 
+          # --- 删除 OpenSSL DLL（已用 WinHTTP 替代，不再需要）---
+          Write-Host "`nRemoving OpenSSL DLLs (replaced by WinHTTP)..."
+          foreach ($dll in @("libcrypto-3.dll","libssl-3.dll","libcrypto-3-x64.dll","libssl-3-x64.dll")) {
+            $p = "dist\ConnectHub-Client\_internal\$dll"
+            if (Test-Path $p) {
+              Remove-Item $p -Force
+              Write-Host "  Removed $dll"
+            }
+          }
+
           # --- 文件大小分析 ---
           Write-Host "`n=== Top 20 largest files in _internal ==="
           Get-ChildItem -Path "dist\ConnectHub-Client\_internal" -Recurse -File -ErrorAction SilentlyContinue | Sort-Object Length -Descending | Select-Object -First 20 | ForEach-Object { $mb = [math]::Round($_.Length / 1MB, 2); Write-Host "  $($_.Name): $mb MB" }
@@ -236,6 +247,7 @@ jobs:
             --exclude-module argparse --exclude-module platform `
             --exclude-module sysconfig --exclude-module pkgutil `
             --exclude-module importlib.machinery --exclude-module importlib.util `
+            --exclude-module ssl --exclude-module _ssl `
             --exclude-module encodings.big5 --exclude-module encodings.big5hkscs `
             --exclude-module encodings.cp932 --exclude-module encodings.cp949 `
             --exclude-module encodings.cp950 --exclude-module encodings.euc_jis_2004 `
@@ -295,6 +307,16 @@ jobs:
             Get-ChildItem -Path $dir.FullName -Recurse -Directory -Filter "opt0.4" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
           }
           Get-ChildItem -Path "dist\ConnectHub-Server\_internal" -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^test_|_test\.py$|test_.*\.py$" } | Remove-Item -Force -ErrorAction SilentlyContinue
+
+          # --- 删除 OpenSSL DLL（已用 WinHTTP 替代，不再需要）---
+          Write-Host "`nRemoving OpenSSL DLLs from server (replaced by WinHTTP)..."
+          foreach ($dll in @("libcrypto-3.dll","libssl-3.dll","libcrypto-3-x64.dll","libssl-3-x64.dll")) {
+            $p = "dist\ConnectHub-Server\_internal\$dll"
+            if (Test-Path $p) {
+              Remove-Item $p -Force
+              Write-Host "  Removed $dll"
+            }
+          }
 
           Write-Host "`n=== _tcl_data / _tk_data / tcl8 subdir sizes (server) ==="
           Get-ChildItem -Path "dist\ConnectHub-Server\_internal" -Recurse -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match "^(tcl|tk|_tcl|_tk)" } | ForEach-Object { $size = (Get-ChildItem -Path $_.FullName -Recurse -File | Measure-Object -Property Length -Sum).Sum; $mb = [math]::Round($size / 1MB, 2); Write-Host "  $($_.FullName.Replace('dist\ConnectHub-Server\_internal\','')): $mb MB" }

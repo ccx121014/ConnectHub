@@ -3,6 +3,14 @@ Main WebSocket Server for Online Collaboration Suite
 Handles all WebSocket connections and message routing.
 """
 
+import sys
+
+# --- 注入 ssl stub（PyInstaller 排除 OpenSSL 后的最小兼容层）---
+if "ssl" not in sys.modules:
+    from client import ssl_stub
+
+    sys.modules["ssl"] = ssl_stub
+
 import asyncio
 import websockets
 import logging
