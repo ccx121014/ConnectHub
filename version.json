@@ -1,8 +1,8 @@
 {
-  "version": "1.4.1",
+  "version": "1.4.2",
   "release_date": "2026-07-08",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.1/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.1/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.1/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.1 — Fix: restore reprlib module required by PyInstaller runtime"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.2/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.2/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.2/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.2 — Fix: restore token/tokenize modules required by inspect module (PyInstaller runtime dependency)"
 }
