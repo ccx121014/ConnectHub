@@ -232,7 +232,7 @@ jobs:
         shell: pwsh
         run: |
           python -OO -m PyInstaller --noconfirm --clean `
-            --onedir --console --strip `
+            --onedir --windowed --strip `
             --paths . --paths server `
             --add-data "protocol;protocol" `
             --add-data "version.json;." `
@@ -240,6 +240,7 @@ jobs:
             --hidden-import websockets --hidden-import user_manager `
             --hidden-import chat_history --hidden-import webrtc_signaling `
             --hidden-import protocol --hidden-import protocol.messages `
+            --hidden-import protocol.signals `
             --exclude-module PyQt5 --exclude-module PyQt5.QtCore `
             --exclude-module PyQt5.QtGui --exclude-module PyQt5.QtWidgets `
             --exclude-module PyQt5.QtNetwork `

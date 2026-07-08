@@ -14,10 +14,64 @@ from pathlib import Path
 from typing import Optional
 
 # --- 注入 ssl stub（PyInstaller 排除 OpenSSL 后的最小兼容层）---
-if "ssl" not in sys.modules:
-    from client import ssl_stub
+# 注意：服务端构建不包含 client 模块，所以这里内联 ssl_stub 代码
+class _SSLError(OSError):
+    pass
 
-    sys.modules["ssl"] = ssl_stub
+class _SSLContext:
+    protocol = None
+    def __init__(self, protocol=None):
+        self.protocol = protocol
+    def wrap_socket(self, sock, *args, **kwargs):
+        raise _SSLError("SSL not available")
+    def load_cert_chain(self, *args, **kwargs):
+        raise _SSLError("SSL not available")
+    def load_verify_locations(self, *args, **kwargs):
+        raise _SSLError("SSL not available")
+    def set_default_verify_paths(self):
+        raise _SSLError("SSL not available")
+    def wrap_bio(self, *args, **kwargs):
+        raise _SSLError("SSL not available")
+
+class _MemoryBIO:
+    def __init__(self):
+        self._buffer = b""
+    def read(self, n=-1):
+        if n < 0 or n >= len(self._buffer):
+            r = self._buffer; self._buffer = b""; return r
+        r = self._buffer[:n]; self._buffer = self._buffer[n:]; return r
+    def write(self, data):
+        self._buffer += data; return len(data)
+    def pending(self): return len(self._buffer)
+    def eof(self): return not self._buffer
+
+class _SSLSocket:
+    family = 0; type = 0; proto = 0
+    def __init__(self, *args, **kwargs): pass
+
+if "ssl" not in sys.modules:
+    class _SSLStubModule:
+        SSLError = _SSLError
+        SSLWantReadError = _SSLError
+        SSLWantWriteError = _SSLError
+        SSLSyscallError = _SSLError
+        SSLEOFError = _SSLError
+        SSLZeroReturnError = _SSLError
+        CertificateError = Exception
+        SSLContext = _SSLContext
+        SSLSocket = _SSLSocket
+        MemoryBIO = _MemoryBIO
+        CERT_NONE = 0; CERT_OPTIONAL = 1; CERT_REQUIRED = 2
+        VERIFY_DEFAULT = 0; OP_ALL = 0
+        HAS_SNI = True; HAS_ALPN = True; HAS_ECDH = True; HAS_NPN = False; HAS_PHA = True
+        OPENSSL_VERSION = "OpenSSL stub"; OPENSSL_VERSION_NUMBER = 0; OPENSSL_VERSION_INFO = (0,0,0,0,0)
+        def create_default_context(*args, **kwargs): return _SSLContext()
+        def wrap_socket(*args, **kwargs): raise _SSLError("SSL not available")
+        def RAND_bytes(n): import os; return os.urandom(n)
+        def RAND_pseudo_bytes(n): return _SSLStubModule.RAND_bytes(n), True
+        def RAND_status(): return True
+        def RAND_add(s, entropy): pass
+    sys.modules["ssl"] = _SSLStubModule()
 
 # Ensure project root on path
 _project_root = Path(__file__).parent.parent.resolve()

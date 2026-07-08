@@ -1,8 +1,8 @@
 {
-  "version": "1.4.4",
+  "version": "1.4.5",
   "release_date": "2026-07-08",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.4/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.4/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.4/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.4 — Fix: restore tkinter.dialog (filedialog dependency); server now uses --windowed mode with proper error handling"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.5/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.5/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.5/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.5 — Fix: server GUI crash (ssl_stub dependency), server --windowed mode, add protocol.signals hidden-import"
 }
