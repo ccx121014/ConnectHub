@@ -1,8 +1,8 @@
 {
-  "version": "1.4.0",
+  "version": "1.4.1",
   "release_date": "2026-07-08",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.0/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.0/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.0/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.0 — 新增自动更新下载安装功能，支持一键下载、进度显示、自动替换并重启"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.1/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.1/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.1/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.1 — Fix: restore reprlib module required by PyInstaller runtime"
 }

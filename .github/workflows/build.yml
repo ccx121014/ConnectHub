@@ -89,7 +89,7 @@ jobs:
             --exclude-module profile --exclude-module pstats `
             --exclude-module netrc --exclude-module getpass `
             --exclude-module mimetypes --exclude-module plistlib `
-            --exclude-module reprlib --exclude-module shlex `
+            --exclude-module shlex `
             --exclude-module code `
             --exclude-module codeop --exclude-module textwrap `
             --exclude-module pickletools --exclude-module shelve `
