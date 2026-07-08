@@ -3,6 +3,7 @@ Chat Widget for Online Collaboration Suite (Tkinter version)
 Provides 1:1 and group chat functionality with message display and input.
 """
 
+import logging
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from datetime import datetime
@@ -17,6 +18,8 @@ _sys.path.insert(0, str(_project_root))
 _sys.path.insert(0, str(Path(__file__).parent))
 
 from protocol.signals import Signal
+
+logger = logging.getLogger(__name__)
 
 
 class BubbleMessage(tk.Frame):
@@ -258,7 +261,6 @@ class ChatWidget(ttk.Frame):
 
         # Enter to send (Shift+Enter for newline)
         self.message_input.bind("<Return>", self._on_enter_key)
-        self.message_input.bind("<Shift-Return>", lambda e: None)
         self.message_input.bind("<KeyRelease>", lambda e: self._update_send_state())
 
         self.send_button = tk.Button(
@@ -376,9 +378,9 @@ class ChatWidget(ttk.Frame):
             try:
                 root.after(0, fn)
             except Exception:
-                fn()
+                logger.debug("Failed to schedule on UI thread, skipping")
         else:
-            fn()
+            logger.debug("No root available, skipping UI update")
 
     def _get_root(self) -> Optional[tk.Misc]:
         try:

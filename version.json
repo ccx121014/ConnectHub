@@ -1,8 +1,8 @@
 {
-  "version": "1.3.2",
-  "release_date": "2026-07-07",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.2/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.2/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.2/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.3.2 — Bugfix: restore importlib.machinery/util for PyInstaller runtime; fix server sender spoofing"
+  "version": "1.3.3",
+  "release_date": "2026-07-08",
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.3/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.3/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.3/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.3.3 — Bugfix: file transfer thread safety, chat Shift+Enter, logout cleanup, desktop stop handling"
 }

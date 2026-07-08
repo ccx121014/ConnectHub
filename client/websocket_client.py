@@ -422,4 +422,4 @@ class WebSocketClient:
             sender=self._username or "",
         )
         self.send(msg)
-        self._closing = True
+        self.stop()

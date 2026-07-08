@@ -153,19 +153,22 @@ class FileTransferManager(SignalBridge):
             return
 
         try:
-            session.status = "in_progress"
             total_chunks = session.total_chunks
             file_size = session.file_size
             target = session.target
 
+            with self._lock:
+                session.status = "in_progress"
+
             with open(session.file_path, "rb") as f:
                 chunk_index = 0
                 while True:
-                    # 允许中途取消
-                    current = self.get_session(file_id)
-                    if current is None or current.status in ("rejected", "error"):
-                        logger.info(f"[FileTransfer] 会话终止，停止发送: {file_id}")
-                        return
+                    current = None
+                    with self._lock:
+                        current = self._sessions.get(file_id)
+                        if current is None or current.status in ("rejected", "error"):
+                            logger.info(f"[FileTransfer] 会话终止，停止发送: {file_id}")
+                            return
 
                     chunk = f.read(CHUNK_SIZE)
                     if not chunk:
@@ -177,7 +180,12 @@ class FileTransferManager(SignalBridge):
                             target, file_id, chunk_index, encoded
                         )
 
-                    session.sent_chunks = chunk_index + 1
+                    with self._lock:
+                        current = self._sessions.get(file_id)
+                        if current is None:
+                            return
+                        current.sent_chunks = chunk_index + 1
+
                     sent_bytes = min(file_size, (chunk_index + 1) * CHUNK_SIZE)
                     self.transfer_progress.emit(file_id, sent_bytes, file_size)
                     chunk_index += 1

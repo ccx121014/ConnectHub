@@ -1000,7 +1000,10 @@ class MainWindow(ttk.Frame):
                 self._desktop_frame._target_var.set(username)
             except Exception:
                 pass
-            self._desktop_frame._on_request_share()
+            try:
+                self._desktop_frame._on_request_share()
+            except Exception:
+                pass
             if self._notebook is not None:
                 try:
                     self._notebook.select(2)
@@ -1255,8 +1258,7 @@ class MainWindow(ttk.Frame):
         sender = getattr(msg, "sender", "")
         if self._desktop_frame is not None:
             self._desktop_frame.set_status(f"{sender} 停止了共享")
-            # 停止本地侧捕获循环
-            self._desktop_frame._stop_capture_loop()
+            self._desktop_frame.stop_all()
 
     def _switch_to_desktop_tab(self):
         if self._notebook is None:
