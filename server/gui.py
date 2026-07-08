@@ -373,8 +373,25 @@ class ServerGUI:
 # Entry
 # ---------------------------------------------------------------------------
 def main():
-    gui = ServerGUI()
-    gui.run()
+    try:
+        gui = ServerGUI()
+        gui.run()
+    except Exception as exc:
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("启动失败", f"服务器启动失败:\n{exc}", parent=root)
+            root.destroy()
+        except Exception:
+            try:
+                # 最后的回退：写入错误日志
+                import traceback
+                with open("server_error.log", "w", encoding="utf-8") as f:
+                    traceback.print_exc(file=f)
+            except Exception:
+                pass
 
 
 if __name__ == "__main__":

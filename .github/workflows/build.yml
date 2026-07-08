@@ -78,7 +78,6 @@ jobs:
             --exclude-module ftplib --exclude-module telnetlib `
             --exclude-module nntplib --exclude-module xmlrpc `
             --exclude-module tkinter.scrolledtext --exclude-module tkinter.dnd `
-            --exclude-module tkinter.dialog `
             --exclude-module tkinter.colorchooser --exclude-module tkinter.simpledialog `
             --exclude-module csv `
             --exclude-module pprint --exclude-module tabnanny `
