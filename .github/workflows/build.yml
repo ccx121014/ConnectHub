@@ -80,7 +80,7 @@ jobs:
             --exclude-module tkinter.scrolledtext --exclude-module tkinter.dnd `
             --exclude-module tkinter.dialog `
             --exclude-module tkinter.colorchooser --exclude-module tkinter.simpledialog `
-            --exclude-module csv --exclude-module difflib `
+            --exclude-module csv `
             --exclude-module pprint --exclude-module tabnanny `
             --exclude-module stringprep --exclude-module compileall `
             --exclude-module multiprocessing `
@@ -91,7 +91,6 @@ jobs:
             --exclude-module mimetypes --exclude-module plistlib `
             --exclude-module shlex `
             --exclude-module code `
-            --exclude-module codeop --exclude-module textwrap `
             --exclude-module pickletools --exclude-module shelve `
             --exclude-module socketserver --exclude-module tty `
             --exclude-module quopri --exclude-module uu `
@@ -107,7 +106,7 @@ jobs:
             --exclude-module symtable `
             --exclude-module lzma --exclude-module _lzma `
             --exclude-module bz2 --exclude-module _bz2 `
-            --exclude-module bisect --exclude-module calendar `
+            --exclude-module calendar `
             --exclude-module configparser --exclude-module getopt `
             --exclude-module argparse --exclude-module platform `
             --exclude-module sysconfig --exclude-module pkgutil `
@@ -268,7 +267,7 @@ jobs:
             --exclude-module symtable `
             --exclude-module lzma --exclude-module _lzma `
             --exclude-module bz2 --exclude-module _bz2 `
-            --exclude-module bisect --exclude-module calendar `
+            --exclude-module calendar `
             --exclude-module configparser --exclude-module getopt `
             --exclude-module argparse --exclude-module platform `
             --exclude-module sysconfig --exclude-module pkgutil `
