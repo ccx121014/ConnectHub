@@ -92,7 +92,6 @@ jobs:
             --exclude-module reprlib --exclude-module shlex `
             --exclude-module code `
             --exclude-module codeop --exclude-module textwrap `
-            --exclude-module ast --exclude-module dis `
             --exclude-module pickletools --exclude-module shelve `
             --exclude-module socketserver --exclude-module tty `
             --exclude-module quopri --exclude-module uu `
@@ -255,7 +254,6 @@ jobs:
             --exclude-module distutils --exclude-module setuptools `
             --exclude-module unicodedata --exclude-module pyexpat `
             --exclude-module xml --exclude-module email `
-            --exclude-module ast --exclude-module dis `
             --exclude-module pickletools --exclude-module shelve `
             --exclude-module socketserver --exclude-module tty `
             --exclude-module quopri --exclude-module uu `
@@ -301,8 +299,9 @@ jobs:
             --exclude-module encodings.mac_roman --exclude-module encodings.mac_turkish `
             --exclude-module encodings.ptcp154 --exclude-module encodings.shift_jis `
             --exclude-module encodings.shift_jis_2004 --exclude-module encodings.shift_jisx0213 `
+            --hidden-import _tkinter `
             --name ConnectHub-Server `
-            server/main.py
+            server/gui.py
           if ($LASTEXITCODE -ne 0) {
             Write-Host "Server build FAILED"
             exit 1
