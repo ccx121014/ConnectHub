@@ -338,6 +338,8 @@ class CollaborationServer:
         )
         await websocket.send(response.to_json())
 
+        await self._handle_disconnect(username)
+
     async def _handle_disconnect(self, username: str):
         """Handle user disconnection"""
         await self._stop_heartbeat(username)

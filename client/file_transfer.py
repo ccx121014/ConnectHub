@@ -194,7 +194,11 @@ class FileTransferManager(SignalBridge):
             if self._ws_client and hasattr(self._ws_client, "send_file_transfer_complete"):
                 self._ws_client.send_file_transfer_complete(target, file_id, total_chunks)
 
-            session.status = "complete"
+            with self._lock:
+                current = self._sessions.get(file_id)
+                if current is not None:
+                    current.status = "complete"
+
             self.transfer_completed.emit(file_id, session.file_path)
             logger.info(f"[FileTransfer] 发送完成: {file_id}")
         except Exception as exc:

@@ -1,8 +1,8 @@
 {
-  "version": "1.3.4",
+  "version": "1.3.5",
   "release_date": "2026-07-08",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.4/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.4/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.4/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.3.4 — Fix: restore ast module for PyInstaller runtime; Add server GUI with start/stop/log/users"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.5/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.5/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.3.5/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.3.5 — Bugfix: server logout cleanup, gui stop mechanism, app.py syntax error, file transfer thread safety"
 }

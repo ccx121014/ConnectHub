@@ -90,8 +90,6 @@ class TkMainThreadDispatcher:
         with self._lock:
             if not self._polling:
                 return
-            # 立刻安排下一次轮询，避免本帧 callback 抛异常导致断档
-            self._schedule_next.__self__  # 占位，无实际意义
         try:
             # 从队列取出并立即运行；限单次取若干项避免拖死主循环
             for _ in range(64):

@@ -60,6 +60,7 @@ class ServerGUI:
         self._server: Optional[CollaborationServer] = None
         self._server_thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._server_obj: Optional[object] = None
         self._stop_event = threading.Event()
 
         self._log_queue: "queue.Queue[tuple]" = queue.Queue()
@@ -163,7 +164,6 @@ class ServerGUI:
         self._log_text.configure(state="normal")
         self._log_text.insert("end", text + "\n")
         self._log_text.see("end")
-        # Limit lines
         lines = int(self._log_text.index("end-1c").split(".")[0])
         if lines > 500:
             self._log_text.delete("1.0", f"{lines - 400}.0")
@@ -238,9 +238,13 @@ class ServerGUI:
     def _on_stop(self):
         self._stop_event.set()
         loop = self._loop
+        server_obj = self._server_obj
         if loop and loop.is_running():
             try:
-                loop.call_soon_threadsafe(loop.stop)
+                if server_obj is not None and hasattr(server_obj, "close"):
+                    loop.call_soon_threadsafe(server_obj.close)
+                else:
+                    loop.call_soon_threadsafe(loop.stop)
             except Exception:
                 pass
         self._start_btn.configure(state="normal")
@@ -253,30 +257,79 @@ class ServerGUI:
         self._loop = loop
 
         try:
+            import main as _main_mod
+            _main_mod.PORT = port
+
             from main import CollaborationServer
             server = CollaborationServer()
             self._server = server
 
-            # monkey-patch port override if needed
-            import main as _main_mod
-            _main_mod.PORT = port
-
             self._status_queue.put(("started", f"0.0.0.0:{port}"))
 
-            # User list refresh task
             async def _refresh_users():
                 while not self._stop_event.is_set():
                     try:
-                        users = list(server._authenticated_clients.keys())
+                        users = []
+                        async with server._global_lock:
+                            users = list(server._authenticated_clients.keys())
                         self._status_queue.put(("users", users))
                     except Exception:
                         pass
                     await asyncio.sleep(2)
 
             async def _main():
-                await server.start()
+                nonlocal self
+                try:
+                    import websockets
+                except Exception:
+                    import websockets
 
-            # Run server + user refresh concurrently
+                server_instance = None
+                param_sets = [
+                    dict(max_size=10*1024*1024),
+                    dict(ping_interval=30, ping_timeout=10, max_size=10*1024*1024),
+                    dict(),
+                ]
+                for params in param_sets:
+                    if self._stop_event.is_set():
+                        return
+                    try:
+                        server_instance = await websockets.serve(
+                            server._handle_client, HOST, port, **params
+                        )
+                        self._server_obj = server_instance
+                        logger.info(f"Server started on ws://{HOST}:{port}")
+                        break
+                    except (TypeError, ValueError) as e:
+                        logger.debug(f"serve() params failed: {e}")
+                        continue
+
+                if server_instance is None:
+                    raise RuntimeError(f"Could not start WebSocket server")
+
+                stop_future = loop.create_future()
+
+                def _on_stop():
+                    if not stop_future.done():
+                        stop_future.set_result(None)
+
+                async def _monitor_stop():
+                    while not self._stop_event.is_set():
+                        await asyncio.sleep(0.5)
+                    _on_stop()
+
+                monitor_task = loop.create_task(_monitor_stop())
+                try:
+                    await stop_future
+                finally:
+                    monitor_task.cancel()
+                    try:
+                        await monitor_task
+                    except asyncio.CancelledError:
+                        pass
+                    server_instance.close()
+                    await server_instance.wait_closed()
+
             refresh_task = loop.create_task(_refresh_users())
             try:
                 loop.run_until_complete(_main())
@@ -305,6 +358,7 @@ class ServerGUI:
                 pass
             self._loop = None
             self._server = None
+            self._server_obj = None
             self._status_queue.put(("stopped", None))
 
     def _on_close(self):
