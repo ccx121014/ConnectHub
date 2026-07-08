@@ -10,12 +10,16 @@ import ctypes
 import json
 import logging
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import threading
+import time
 import webbrowser
 from ctypes import wintypes
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 from urllib.parse import urlparse
 
 _project_root = Path(__file__).parent.parent.resolve()
@@ -129,6 +133,117 @@ def _winhttp_get(url: str, timeout_ms: int = 10000) -> bytes:
         winhttp.WinHttpCloseHandle(hSession)
 
 
+def _winhttp_download(
+    url: str,
+    save_path: str,
+    timeout_ms: int = 60000,
+    progress_cb: Optional[Callable[[int, int], None]] = None,
+) -> int:
+    """使用 WinHTTP 下载文件到本地路径，返回下载字节数。"""
+    winhttp = ctypes.windll.winhttp
+
+    hSession = winhttp.WinHttpOpen(
+        f"ConnectHub-Updater/{_DEFAULT_VERSION}",
+        1,  # WINHTTP_ACCESS_TYPE_DEFAULT_PROXY
+        None,
+        None,
+        0,
+    )
+    if not hSession:
+        raise OSError("WinHttpOpen failed")
+
+    try:
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+        hConnect = winhttp.WinHttpConnect(hSession, host, port, 0)
+        if not hConnect:
+            raise OSError("WinHttpConnect failed")
+
+        try:
+            path = parsed.path or "/"
+            if parsed.query:
+                path += "?" + parsed.query
+
+            flags = 0x00800000 if parsed.scheme == "https" else 0
+            hRequest = winhttp.WinHttpOpenRequest(
+                hConnect, "GET", path, None, None, None, flags
+            )
+            if not hRequest:
+                raise OSError("WinHttpOpenRequest failed")
+
+            try:
+                if timeout_ms > 0:
+                    dw = wintypes.DWORD(timeout_ms)
+                    sz = ctypes.sizeof(dw)
+                    winhttp.WinHttpSetOption(hRequest, 11, ctypes.byref(dw), sz)
+                    winhttp.WinHttpSetOption(hRequest, 5, ctypes.byref(dw), sz)
+                    winhttp.WinHttpSetOption(hRequest, 6, ctypes.byref(dw), sz)
+
+                if not winhttp.WinHttpSendRequest(
+                    hRequest, None, 0, None, 0, 0, 0
+                ):
+                    raise OSError("WinHttpSendRequest failed")
+
+                if not winhttp.WinHttpReceiveResponse(hRequest, None):
+                    raise OSError("WinHttpReceiveResponse failed")
+
+                status_code = wintypes.DWORD()
+                status_size = wintypes.DWORD(ctypes.sizeof(status_code))
+                winhttp.WinHttpQueryHeaders(
+                    hRequest, 19, None,
+                    ctypes.byref(status_code),
+                    ctypes.byref(status_size), None,
+                )
+                code = int(status_code.value)
+                if code != 200:
+                    raise OSError(f"HTTP {code}")
+
+                total_size = 0
+                content_length = wintypes.DWORD()
+                cl_size = wintypes.DWORD(ctypes.sizeof(content_length))
+                if winhttp.WinHttpQueryHeaders(
+                    hRequest, 5, None,  # WINHTTP_QUERY_CONTENT_LENGTH
+                    ctypes.byref(content_length),
+                    ctypes.byref(cl_size), None,
+                ):
+                    total_size = int(content_length.value)
+
+                downloaded = 0
+                with open(save_path, "wb") as f:
+                    while True:
+                        avail = wintypes.DWORD()
+                        if not winhttp.WinHttpQueryDataAvailable(
+                            hRequest, ctypes.byref(avail)
+                        ):
+                            raise OSError("WinHttpQueryDataAvailable failed")
+                        if avail.value == 0:
+                            break
+                        buf = ctypes.create_string_buffer(avail.value)
+                        read = wintypes.DWORD()
+                        if not winhttp.WinHttpReadData(
+                            hRequest, buf, avail.value, ctypes.byref(read)
+                        ):
+                            raise OSError("WinHttpReadData failed")
+                        chunk = buf.raw[: read.value]
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if progress_cb:
+                            try:
+                                progress_cb(downloaded, total_size)
+                            except Exception:
+                                pass
+
+                return downloaded
+            finally:
+                winhttp.WinHttpCloseHandle(hRequest)
+        finally:
+            winhttp.WinHttpCloseHandle(hConnect)
+    finally:
+        winhttp.WinHttpCloseHandle(hSession)
+
+
 def _find_version_json() -> Path:
     """查找 version.json：兼容 PyInstaller onefile / onedir / 源码运行。"""
     # PyInstaller 打包后：sys._MEIPASS 指向 bundle 目录
@@ -174,6 +289,8 @@ class Updater:
         self.update_available = Signal(str, str, str)  # (current, new, release_url)
         self.no_update = Signal()
         self.update_error = Signal(str)
+        self.download_progress = Signal(int, int)  # (downloaded_bytes, total_bytes)
+        self.update_ready = Signal(str)  # (version) - 下载完成，准备应用
 
     # -------- 配置 --------
     def _load_version_config(self) -> Dict[str, Any]:
@@ -252,18 +369,29 @@ class Updater:
 
         # 优先使用 assets 中的安装包链接，否则用 release page
         download_url = html_url
+        client_zip_url = None
+        setup_exe_url = None
         assets = data.get("assets", []) or []
         for a in assets:
             if not isinstance(a, dict):
                 continue
             name = (a.get("name") or "").lower()
-            # 优先选择安装/客户端压缩包
-            if name.endswith(".exe") or ("client" in name and name.endswith(".zip")):
-                download_url = a.get("browser_download_url") or html_url
-                break
+            url = a.get("browser_download_url") or ""
+            if "client" in name and name.endswith(".zip"):
+                client_zip_url = url
+            elif name.endswith("setup.exe") or name.endswith("-installer.exe"):
+                setup_exe_url = url
+
+        # 优先客户端 zip（用于自动更新覆盖），其次安装包，最后 release 页
+        if client_zip_url:
+            download_url = client_zip_url
+        elif setup_exe_url:
+            download_url = setup_exe_url
 
         self.latest_version = tag_name
         self.latest_url = download_url
+        self.latest_client_zip_url = client_zip_url
+        self.latest_setup_url = setup_exe_url
         self.latest_notes = str(data.get("body") or data.get("name") or "")
 
         cmp_result = self._compare_versions(tag_name, self.current_version)
@@ -284,6 +412,135 @@ class Updater:
             target=self._run_check, args=(show_dialog,), daemon=True
         )
         t.start()
+
+    # -------- 下载与应用更新 --------
+    def download_update(self):
+        """后台线程下载更新包，通过 download_progress 信号报告进度。"""
+        t = threading.Thread(target=self._run_download, daemon=True)
+        t.start()
+
+    def _run_download(self):
+        if not getattr(self, "latest_client_zip_url", None):
+            self.update_error.emit("未找到客户端更新包")
+            return
+
+        url = self.latest_client_zip_url
+        try:
+            tmp_dir = tempfile.mkdtemp(prefix="connecthub_update_")
+            zip_path = os.path.join(tmp_dir, "update.zip")
+
+            def _progress(d, t):
+                self.download_progress.emit(d, t)
+
+            _winhttp_download(url, zip_path, timeout_ms=300000, progress_cb=_progress)
+
+            # 校验 zip
+            if os.path.getsize(zip_path) < 1024:
+                raise OSError("下载文件过小，可能失败")
+
+            self._update_zip_path = zip_path
+            self._update_tmp_dir = tmp_dir
+            self.update_ready.emit(self.latest_version or "")
+        except Exception as exc:
+            logger.error(f"下载更新失败: {exc}", exc_info=True)
+            self.update_error.emit(f"下载失败: {exc}")
+
+    def apply_update_and_restart(self):
+        """应用已下载的更新并重启程序。仅在 frozen (PyInstaller) 模式下有效。"""
+        if not getattr(sys, "frozen", False):
+            self.update_error.emit("源码运行模式下无法自动更新")
+            return False
+
+        zip_path = getattr(self, "_update_zip_path", None)
+        tmp_dir = getattr(self, "_update_tmp_dir", None)
+        if not zip_path or not os.path.exists(zip_path):
+            self.update_error.emit("尚未下载更新包")
+            return False
+
+        try:
+            exe_dir = Path(sys.executable).parent
+            extract_dir = os.path.join(tmp_dir, "extracted")
+            os.makedirs(extract_dir, exist_ok=True)
+
+            # 使用 Python 内置 zipfile 解压（Windows 自带）
+            import zipfile
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(extract_dir)
+
+            # 找到解压后的 _internal 目录或 exe
+            new_exe = None
+            extracted_root = extract_dir
+            entries = os.listdir(extract_dir)
+            # 如果只有一个子目录，进入该目录
+            if len(entries) == 1 and os.path.isdir(os.path.join(extract_dir, entries[0])):
+                extracted_root = os.path.join(extract_dir, entries[0])
+
+            for f in os.listdir(extracted_root):
+                if f.lower().endswith(".exe") and "connecthub" in f.lower():
+                    new_exe = os.path.join(extracted_root, f)
+                    break
+
+            if not new_exe:
+                # 尝试找任意 exe
+                for f in os.listdir(extracted_root):
+                    if f.lower().endswith(".exe"):
+                        new_exe = os.path.join(extracted_root, f)
+                        break
+
+            if not new_exe:
+                raise OSError("更新包中未找到可执行文件")
+
+            # 生成批处理脚本，在程序退出后替换并重启
+            bat_path = os.path.join(tmp_dir, "update_and_restart.bat")
+            current_exe = sys.executable
+            current_exe_name = os.path.basename(current_exe)
+            new_exe_name = os.path.basename(new_exe)
+
+            # 查找解压后的 _internal 目录名（如果是 onedir）
+            new_internal = None
+            for d in os.listdir(extracted_root):
+                d_path = os.path.join(extracted_root, d)
+                if os.path.isdir(d_path) and d.startswith("_"):
+                    new_internal = d
+                    break
+
+            bat_content = f"""@echo off
+chcp 65001 >nul
+echo Updating ConnectHub, please wait...
+timeout /t 2 /nobreak >nul
+
+cd /d "{exe_dir}"
+
+rem 备份旧版本
+if exist "{current_exe_name}.old" del /q "{current_exe_name}.old"
+if exist "{current_exe_name}" ren "{current_exe_name}" "{current_exe_name}.old"
+
+rem 复制新文件
+xcopy /E /I /Y "{extracted_root}\\*" "." >nul
+
+rem 启动新版本
+start "" "{current_exe_name}"
+
+rem 清理临时文件（延迟删除自身）
+ping 127.0.0.1 -n 3 >nul
+rmdir /s /q "{tmp_dir}" 2>nul
+"""
+            with open(bat_path, "w", encoding="utf-8") as f:
+                f.write(bat_content)
+
+            # 启动 bat 并退出当前程序
+            subprocess.Popen(
+                ["cmd.exe", "/c", bat_path],
+                creationflags=0x00000008,  # DETACHED_PROCESS
+            )
+
+            # 退出当前程序
+            logger.info("更新已准备，即将退出并重启...")
+            return True
+        except Exception as exc:
+            logger.error(f"应用更新失败: {exc}", exc_info=True)
+            self.update_error.emit(f"应用更新失败: {exc}")
+            return False
 
     # -------- Tk 弹窗 --------
     def _show_update_dialog(self, new_version: str, release_url: str):

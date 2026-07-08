@@ -935,7 +935,168 @@ class MainWindow(ttk.Frame):
                 logger.debug(f"logout_requested 回调异常: {exc}")
 
     def _on_check_updates(self):
-        self._updater.check_for_updates(show_dialog=True)
+        updater = self._updater
+
+        # 连接 updater 信号
+        if not getattr(self, "_updater_signals_connected", False):
+            updater.update_available.connect(self._on_update_available)
+            updater.no_update.connect(self._on_no_update)
+            updater.download_progress.connect(self._on_update_download_progress)
+            updater.update_ready.connect(self._on_update_ready)
+            updater.update_error.connect(self._on_update_error)
+            self._updater_signals_connected = True
+
+        updater.check_for_updates(show_dialog=False)
+
+    def _on_update_available(self, current: str, new: str, url: str):
+        """发现新版本，询问是否下载。"""
+        result = self._ask_yes_no(
+            "发现新版本",
+            f"发现新版本 v{new.lstrip('v')}\n"
+            f"当前版本: v{current}\n\n"
+            f"是否立即下载并安装更新？",
+            yes_text="立即下载", no_text="稍后再说"
+        )
+        if result:
+            self._show_download_dialog()
+            self._updater.download_update()
+
+    def _on_no_update(self):
+        """已是最新版本。"""
+        try:
+            from tkinter import messagebox
+            messagebox.showinfo("检查更新", "当前已是最新版本", parent=self.master)
+        except Exception:
+            pass
+
+    def _show_download_dialog(self):
+        """显示下载进度对话框。"""
+        import tkinter as tk
+        dialog = tk.Toplevel(self.master)
+        dialog.title("下载更新")
+        dialog.transient(self.master)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        dialog.geometry("400x160")
+
+        tk.Label(dialog, text="正在下载更新，请稍候...", pady=16,
+                 font=("TkDefaultFont", 11, "bold")).pack()
+
+        self._download_label = tk.Label(dialog, text="准备中...")
+        self._download_label.pack(pady=4)
+
+        self._download_progress = ttk.Progressbar(
+            dialog, orient="horizontal", length=340, mode="determinate"
+        )
+        self._download_progress.pack(pady=8)
+
+        self._update_dialog = dialog
+
+    def _on_update_download_progress(self, downloaded: int, total: int):
+        """更新下载进度条。"""
+        if hasattr(self, "_update_dialog") and self._update_dialog is not None:
+            try:
+                if total > 0:
+                    pct = (downloaded / total) * 100
+                    self._download_progress["value"] = pct
+                    mb_down = downloaded / 1024 / 1024
+                    mb_total = total / 1024 / 1024
+                    self._download_label.configure(
+                        text=f"{mb_down:.1f} MB / {mb_total:.1f} MB"
+                    )
+                else:
+                    mb_down = downloaded / 1024 / 1024
+                    self._download_progress.configure(mode="indeterminate")
+                    self._download_progress.start(10)
+                    self._download_label.configure(text=f"已下载 {mb_down:.1f} MB")
+            except Exception:
+                pass
+
+    def _on_update_ready(self, version: str):
+        """下载完成，提示用户是否立即更新。"""
+        if hasattr(self, "_update_dialog") and self._update_dialog is not None:
+            try:
+                self._update_dialog.destroy()
+            except Exception:
+                pass
+            self._update_dialog = None
+
+        result = self._ask_yes_no(
+            "更新下载完成",
+            f"新版本 v{version.lstrip('v')} 已下载完成。\n是否立即安装并重启？",
+            yes_text="立即安装", no_text="稍后安装"
+        )
+        if result:
+            self._apply_update_and_restart()
+
+    def _on_update_error(self, msg: str):
+        """更新出错。"""
+        if hasattr(self, "_update_dialog") and self._update_dialog is not None:
+            try:
+                self._update_dialog.destroy()
+            except Exception:
+                pass
+            self._update_dialog = None
+        try:
+            from tkinter import messagebox
+            messagebox.showerror("更新失败", msg, parent=self.master)
+        except Exception:
+            pass
+
+    def _apply_update_and_restart(self):
+        """应用更新并重启。"""
+        if self._updater.apply_update_and_restart():
+            try:
+                self._stop_all()
+            except Exception:
+                pass
+            # 延迟退出，让 bat 接管
+            try:
+                if self.master is not None:
+                    self.master.after(200, self.master.destroy)
+            except Exception:
+                pass
+
+    def _ask_yes_no(self, title: str, message: str, yes_text: str = "是",
+                     no_text: str = "否") -> bool:
+        """简单的自定义 Yes/No 对话框。"""
+        import tkinter as tk
+        dialog = tk.Toplevel(self.master)
+        dialog.title(title)
+        dialog.transient(self.master)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        dialog.update_idletasks()
+        w, h = 380, 170
+        try:
+            sw = dialog.winfo_screenwidth()
+            sh = dialog.winfo_screenheight()
+            x = (sw - w) // 2
+            y = (sh - h) // 2
+            dialog.geometry(f"{w}x{h}+{x}+{y}")
+        except Exception:
+            dialog.geometry(f"{w}x{h}")
+
+        tk.Label(
+            dialog, text=message, justify="left", padx=18, pady=18, wraplength=w - 40
+        ).pack(fill="both", expand=True)
+
+        result = {"value": False}
+        def on_yes():
+            result["value"] = True
+            dialog.destroy()
+        def on_no():
+            result["value"] = False
+            dialog.destroy()
+
+        btn_frame = tk.Frame(dialog)
+        btn_frame.pack(pady=10)
+        tk.Button(btn_frame, text=yes_text, width=10, command=on_yes).pack(side="left", padx=8)
+        tk.Button(btn_frame, text=no_text, width=10, command=on_no).pack(side="left", padx=8)
+
+        dialog.protocol("WM_DELETE_WINDOW", on_no)
+        dialog.wait_window()
+        return result["value"]
 
     def _stop_all(self):
         if self._desktop_frame is not None:

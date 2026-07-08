@@ -1,6 +1,6 @@
 [Setup]
 AppName=ConnectHub
-AppVersion=1.3.5
+AppVersion=1.4.0
 DefaultDirName={pf}\ConnectHub
 DefaultGroupName=ConnectHub
 OutputBaseFilename=ConnectHub-Setup
