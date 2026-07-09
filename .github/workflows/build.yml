@@ -52,6 +52,13 @@ jobs:
             --hidden-import login_dialog --hidden-import updater `
             --hidden-import protocol.messages --hidden-import protocol.signals `
             --hidden-import protocol --hidden-import _tkinter `
+            --hidden-import email --hidden-import email.message `
+            --hidden-import email.parser --hidden-import email.feedparser `
+            --hidden-import email.header --hidden-import email.charset `
+            --hidden-import email.encoders --hidden-import email.errors `
+            --hidden-import email.utils --hidden-import email.policy `
+            --hidden-import email.contentmanager --hidden-import email.iterators `
+            --hidden-import importlib.metadata `
             --exclude-module PyQt5 --exclude-module PyQt5.QtCore `
             --exclude-module PyQt5.QtGui --exclude-module PyQt5.QtWidgets `
             --exclude-module PyQt5.QtNetwork `
@@ -72,27 +79,24 @@ jobs:
             --exclude-module unicodedata --exclude-module pyexpat `
             --exclude-module xml --exclude-module xml.dom `
             --exclude-module xml.etree --exclude-module xml.parsers `
-            --exclude-module xml.sax --exclude-module email `
+            --exclude-module xml.sax `
             --exclude-module http.server --exclude-module http.cookiejar `
             --exclude-module http.cookies `
             --exclude-module ftplib --exclude-module telnetlib `
             --exclude-module nntplib --exclude-module xmlrpc `
             --exclude-module tkinter.scrolledtext --exclude-module tkinter.dnd `
-            --exclude-module tkinter.colorchooser --exclude-module tkinter.simpledialog `
-            --exclude-module csv `
+            --exclude-module tkinter.colorchooser `
             --exclude-module pprint --exclude-module tabnanny `
             --exclude-module stringprep --exclude-module compileall `
-            --exclude-module multiprocessing `
             --exclude-module fractions --exclude-module statistics `
             --exclude-module numbers --exclude-module pdb `
             --exclude-module profile --exclude-module pstats `
             --exclude-module netrc --exclude-module getpass `
             --exclude-module mimetypes --exclude-module plistlib `
-            --exclude-module shlex `
             --exclude-module code `
             --exclude-module pickletools --exclude-module shelve `
             --exclude-module socketserver --exclude-module tty `
-            --exclude-module quopri --exclude-module uu `
+            --exclude-module uu `
             --exclude-module binhex --exclude-module xdrlib `
             --exclude-module cmd --exclude-module trace `
             --exclude-module tracemalloc --exclude-module cProfile `
@@ -103,12 +107,10 @@ jobs:
             --exclude-module rlcompleter --exclude-module readline `
             --exclude-module py_compile --exclude-module modulefinder `
             --exclude-module symtable `
-            --exclude-module lzma --exclude-module _lzma `
-            --exclude-module bz2 --exclude-module _bz2 `
             --exclude-module calendar `
             --exclude-module configparser --exclude-module getopt `
-            --exclude-module argparse --exclude-module platform `
-            --exclude-module sysconfig --exclude-module pkgutil `
+            --exclude-module argparse `
+            --exclude-module pkgutil `
             --exclude-module ssl --exclude-module _ssl `
             --exclude-module encodings.big5 --exclude-module encodings.big5hkscs `
             --exclude-module encodings.cp932 --exclude-module encodings.cp949 `
@@ -241,6 +243,13 @@ jobs:
             --hidden-import chat_history --hidden-import webrtc_signaling `
             --hidden-import protocol --hidden-import protocol.messages `
             --hidden-import protocol.signals `
+            --hidden-import email --hidden-import email.message `
+            --hidden-import email.parser --hidden-import email.feedparser `
+            --hidden-import email.header --hidden-import email.charset `
+            --hidden-import email.encoders --hidden-import email.errors `
+            --hidden-import email.utils --hidden-import email.policy `
+            --hidden-import email.contentmanager --hidden-import email.iterators `
+            --hidden-import importlib.metadata `
             --exclude-module PyQt5 --exclude-module PyQt5.QtCore `
             --exclude-module PyQt5.QtGui --exclude-module PyQt5.QtWidgets `
             --exclude-module PyQt5.QtNetwork `
@@ -251,10 +260,10 @@ jobs:
             --exclude-module idlelib --exclude-module lib2to3 `
             --exclude-module distutils --exclude-module setuptools `
             --exclude-module unicodedata --exclude-module pyexpat `
-            --exclude-module xml --exclude-module email `
+            --exclude-module xml `
             --exclude-module pickletools --exclude-module shelve `
             --exclude-module socketserver --exclude-module tty `
-            --exclude-module quopri --exclude-module uu `
+            --exclude-module uu `
             --exclude-module binhex --exclude-module xdrlib `
             --exclude-module cmd --exclude-module trace `
             --exclude-module tracemalloc --exclude-module cProfile `
@@ -265,12 +274,10 @@ jobs:
             --exclude-module rlcompleter --exclude-module readline `
             --exclude-module py_compile --exclude-module modulefinder `
             --exclude-module symtable `
-            --exclude-module lzma --exclude-module _lzma `
-            --exclude-module bz2 --exclude-module _bz2 `
             --exclude-module calendar `
             --exclude-module configparser --exclude-module getopt `
-            --exclude-module argparse --exclude-module platform `
-            --exclude-module sysconfig --exclude-module pkgutil `
+            --exclude-module argparse `
+            --exclude-module pkgutil `
             --exclude-module ssl --exclude-module _ssl `
             --exclude-module encodings.big5 --exclude-module encodings.big5hkscs `
             --exclude-module encodings.cp932 --exclude-module encodings.cp949 `
