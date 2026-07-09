@@ -1,8 +1,8 @@
 {
-  "version": "1.4.5",
-  "release_date": "2026-07-08",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.5/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.5/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.5/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.5 — Fix: server GUI crash (ssl_stub dependency), server --windowed mode, add protocol.signals hidden-import"
+  "version": "1.4.6",
+  "release_date": "2026-07-09",
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.6/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.6/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.6/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.6 — Fix: restore lzma/bz2/email/platform/sysconfig/quopri/csv/multiprocessing/shlex PyInstaller dependencies (eliminate startup ModuleNotFoundError)"
 }
