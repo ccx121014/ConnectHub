@@ -1,8 +1,8 @@
 {
-  "version": "1.4.6",
+  "version": "1.4.7",
   "release_date": "2026-07-09",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.6/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.6/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.6/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.6 — Fix: restore lzma/bz2/email/platform/sysconfig/quopri/csv/multiprocessing/shlex PyInstaller dependencies (eliminate startup ModuleNotFoundError)"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.7/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.7/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.7/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.7 — Fix: restore calendar module (needed by email._parseaddr via importlib.metadata chain)"
 }
