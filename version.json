@@ -1,8 +1,8 @@
 {
-  "version": "1.4.7",
+  "version": "1.4.8",
   "release_date": "2026-07-09",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.7/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.7/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.7/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.7 — Fix: restore calendar module (needed by email._parseaddr via importlib.metadata chain)"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.8/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.8/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.8/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.8 — Fix: keep calendar (email._parseaddr needs it), restore unicodedata/mimetypes exclusions (lazy imports, not startup-critical) to reduce size"
 }
