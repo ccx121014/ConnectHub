@@ -1,8 +1,8 @@
 {
-  "version": "1.4.8",
-  "release_date": "2026-07-09",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.8/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.8/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.8/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.8 — Fix: keep calendar (email._parseaddr needs it), restore unicodedata/mimetypes exclusions (lazy imports, not startup-critical) to reduce size"
+  "version": "1.4.9",
+  "release_date": "2026-07-11",
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.9/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.9/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.9/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.9 — Fix: client connection failover to 127.0.0.1 when localhost resolves to IPv6 (server binds to 0.0.0.0 IPv4)"
 }
