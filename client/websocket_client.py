@@ -34,7 +34,11 @@ class WebSocketClient:
     def __init__(self, host: str = "localhost", port: int = 8765):
         self.host = host
         self.port = port
-        self.uri = f"ws://{host}:{port}"
+        self._uris = [
+            f"ws://{host}:{port}",
+        ]
+        if host == "localhost":
+            self._uris.append(f"ws://127.0.0.1:{port}")
 
         self.signals = SignalBridge()
 
@@ -153,7 +157,7 @@ class WebSocketClient:
 
             self._reconnect_attempt += 1
             if self._reconnect_attempt > self._max_reconnect_attempts:
-                error_msg = f"连接失败：无法连接到 {self.uri}"
+                error_msg = f"连接失败：无法连接到 {self._uris}"
                 logger.error(error_msg)
                 self.signals.connection_failed.emit(error_msg)
                 break
@@ -181,35 +185,42 @@ class WebSocketClient:
             dict(),
             dict(ping_interval=30, ping_timeout=10),
         ]
-        for params in param_sets:
+        
+        for uri in self._uris:
             if self._closing:
                 return
-            try:
-                logger.info(f"Connecting to {self.uri} (params: {list(params.keys())})")
-                conn = await asyncio.wait_for(
-                    websockets.connect(self.uri, **params),
-                    timeout=5,
-                )
-                logger.info(f"Connected to {self.uri}")
+            for params in param_sets:
+                if self._closing:
+                    return
+                try:
+                    logger.info(f"Connecting to {uri} (params: {list(params.keys())})")
+                    conn = await asyncio.wait_for(
+                        websockets.connect(uri, **params),
+                        timeout=5,
+                    )
+                    logger.info(f"Connected to {uri}")
+                    self.uri = uri
+                    break
+                except asyncio.TimeoutError:
+                    logger.warning("Connection timed out (5s)")
+                    continue
+                except (TypeError, ValueError) as e:
+                    logger.debug(f"Params failed: {e}")
+                    continue
+                except ConnectionRefusedError:
+                    logger.warning(f"Connection refused — trying next address")
+                    continue
+                except OSError as e:
+                    logger.warning(f"OS error: {e}")
+                    continue
+                except Exception as e:
+                    logger.warning(f"Connect failed: {e}")
+                    continue
+            if conn is not None:
                 break
-            except asyncio.TimeoutError:
-                logger.warning("Connection timed out (5s)")
-                continue
-            except (TypeError, ValueError) as e:
-                logger.debug(f"Params failed: {e}")
-                continue
-            except ConnectionRefusedError:
-                logger.warning(f"Connection refused — is the server running at {self.uri}?")
-                continue
-            except OSError as e:
-                logger.warning(f"OS error: {e}")
-                continue
-            except Exception as e:
-                logger.warning(f"Connect failed: {e}")
-                continue
 
         if conn is None:
-            raise RuntimeError(f"Could not connect to {self.uri}")
+            raise RuntimeError(f"Could not connect to {self._uris}")
 
         self._websocket = conn
         with self._state_lock:
