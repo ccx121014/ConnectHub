@@ -155,6 +155,7 @@ class CollaborationApp:
 
         # 应用状态
         self._username = None
+        self._password = None
         self._server = None
         self._port = None
         self._mode = None  # "connect" 或 "register"
@@ -224,6 +225,7 @@ class CollaborationApp:
         self._server = server
         self._port = port
         self._username = username
+        self._password = password
         self._mode = mode
 
         # 创建 WebSocketClient
@@ -254,12 +256,12 @@ class CollaborationApp:
                 MessageType.AUTH_REQUEST,
                 sender=self._username,
                 username=self._username,
-                password="",
+                password=self._password,
                 register=True,
             )
             self._ws_client.send(msg)
         else:
-            self._ws_client.send_auth_request(self._username, "")
+            self._ws_client.send_auth_request(self._username, self._password)
 
     def _on_ws_error(self, error: str):
         logger.error("WebSocket error: %s", error)
