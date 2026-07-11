@@ -1,8 +1,8 @@
 {
-  "version": "1.4.10",
+  "version": "1.4.11",
   "release_date": "2026-07-11",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.10/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.10/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.10/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.10 — Fix: pass actual password to auth request (was hardcoded to empty string, causing immediate disconnect after connecting)"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.11/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.11/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.11/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.11 — Fix: add try/except around auth success handler to catch and display main window initialization errors"
 }
