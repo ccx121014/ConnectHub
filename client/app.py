@@ -310,6 +310,17 @@ class CollaborationApp:
 
     # --- 认证成功 / 登出 -------------------------------------------------
     def _on_auth_success(self):
+        try:
+            self._do_on_auth_success()
+        except Exception as e:
+            logger.exception(f"认证成功后初始化主窗口失败: {e}")
+            if self._login_dialog is not None:
+                try:
+                    self._login_dialog.show_error(f"主窗口初始化失败: {e}")
+                except Exception:
+                    pass
+
+    def _do_on_auth_success(self):
         # 关闭登录对话框
         if self._login_dialog is not None:
             try:
