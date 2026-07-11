@@ -1,8 +1,8 @@
 {
-  "version": "1.4.9",
+  "version": "1.4.10",
   "release_date": "2026-07-11",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.9/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.9/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.9/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.9 — Fix: client connection failover to 127.0.0.1 when localhost resolves to IPv6 (server binds to 0.0.0.0 IPv4)"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.10/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.10/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.10/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.10 — Fix: pass actual password to auth request (was hardcoded to empty string, causing immediate disconnect after connecting)"
 }
