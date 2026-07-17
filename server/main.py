@@ -290,21 +290,31 @@ class CollaborationServer:
         if password != "":  # In production, verify against a database
             pass
 
+        # 如果用户已认证过，先清理旧的心跳任务（避免重复心跳 / 旧连接残留）
+        async with self._global_lock:
+            already = username in self._authenticated_clients
+        if already:
+            logger.info(f"用户 {username} 重复登录，清理旧心跳")
+            await self._stop_heartbeat(username)
+
         await self.user_manager.register_user(username, websocket)
 
         async with self._global_lock:
             self._authenticated_clients[username] = websocket
 
-        response = create_message(
-            MessageType.AUTH_RESPONSE,
-            sender="server",
-            target=username,
-            success=success,
-            message="Authentication successful" if success else "Invalid credentials",
-            timestamp=time.time()
-        )
-
-        await websocket.send(response.to_json())
+        try:
+            response = create_message(
+                MessageType.AUTH_RESPONSE,
+                sender="server",
+                target=username,
+                success=success,
+                message="Authentication successful" if success else "Invalid credentials",
+                timestamp=time.time()
+            )
+            await websocket.send(response.to_json())
+        except Exception as exc:
+            logger.error(f"发送认证响应失败 {username}: {exc}")
+            return None
 
         user_groups = await self.chat_history.get_user_groups(username)
         if user_groups:
@@ -329,14 +339,17 @@ class CollaborationServer:
         """Handle logout request"""
         username = message.sender
 
-        response = create_message(
-            MessageType.AUTH_RESPONSE,
-            sender="server",
-            target=username,
-            success=True,
-            message="Logged out successfully"
-        )
-        await websocket.send(response.to_json())
+        try:
+            response = create_message(
+                MessageType.AUTH_RESPONSE,
+                sender="server",
+                target=username,
+                success=True,
+                message="Logged out successfully"
+            )
+            await websocket.send(response.to_json())
+        except Exception as exc:
+            logger.warning(f"Failed to send logout ack to {username}: {exc}")
 
         await self._handle_disconnect(username)
 

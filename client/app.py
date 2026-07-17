@@ -288,6 +288,11 @@ class CollaborationApp:
         if message.type != MessageType.AUTH_RESPONSE:
             return
 
+        # 如果主窗口已显示（已登录），忽略迟到的响应 — 避免重入
+        if self._main_window is not None:
+            logger.debug("主窗口已显示，忽略迟到的 AUTH_RESPONSE")
+            return
+
         success = message.payload.get("success", False) if isinstance(message.payload, dict) else False
         if success:
             logger.info("Authentication successful")
