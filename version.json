@@ -1,8 +1,8 @@
 {
-  "version": "1.4.12",
+  "version": "1.4.13",
   "release_date": "2026-07-11",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.12/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.12/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.12/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.12 — Fix: (1) AttributeError in WebSocketClient.start() referencing undefined self.uri; (2) login dialog closed before main window creation causing app to appear closed on init error"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.13/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.13/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.13/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.13 — Fix: add missing set_status() method to MainWindow (was causing AttributeError on auth success)"
 }

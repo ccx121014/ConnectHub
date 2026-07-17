@@ -743,6 +743,10 @@ class MainWindow(ttk.Frame):
 
         self._update_status_bar()
 
+    def set_status(self, status: str):
+        """设置状态栏文本（由 app.py 调用）。"""
+        self._run_ui(lambda: self._update_status_bar(status_override=status))
+
     def show(self):
         """显示主窗口。"""
         if self.master is not None:
