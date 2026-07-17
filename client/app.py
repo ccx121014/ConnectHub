@@ -321,15 +321,8 @@ class CollaborationApp:
                     pass
 
     def _do_on_auth_success(self):
-        # 关闭登录对话框
-        if self._login_dialog is not None:
-            try:
-                self._login_dialog.close()
-            except Exception:
-                pass
-            self._login_dialog = None
-
-        # 创建 / 显示主窗口
+        # 先创建并显示主窗口，确保成功后再关闭登录对话框
+        # （否则主窗口创建异常时登录框已消失，表现为"自动关闭"）
         if self._main_window is None:
             self._main_window = MainWindow(self._root)
             self._main_window.logout_requested.connect(self._dispatcher.wrap(self._on_logout_requested))
@@ -338,6 +331,14 @@ class CollaborationApp:
         self._main_window.set_websocket_client(self._ws_client)
         self._main_window.set_status("已连接")
         self._main_window.show()
+
+        # 主窗口已显示，现在安全地关闭登录对话框
+        if self._login_dialog is not None:
+            try:
+                self._login_dialog.close()
+            except Exception:
+                pass
+            self._login_dialog = None
 
         if self._ws_client is not None:
             try:

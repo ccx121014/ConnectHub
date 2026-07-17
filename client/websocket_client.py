@@ -47,6 +47,7 @@ class WebSocketClient:
         self._closing = False
         self._reconnect_attempt = 0
         self._max_reconnect_attempts = 2
+        self.uri: Optional[str] = None
 
         self._thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
