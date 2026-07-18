@@ -25,7 +25,7 @@ jobs:
       - name: Install deps + UPX
         shell: pwsh
         run: |
-          pip install --upgrade pip websockets pyinstaller
+          pip install --upgrade pip websockets pyinstaller Pillow
           $upxUrl = "https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-win64.zip"
           Invoke-WebRequest -Uri $upxUrl -OutFile "$env:TEMP\upx.zip" -UseBasicParsing
           Expand-Archive -Path "$env:TEMP\upx.zip" -DestinationPath "$env:TEMP" -Force
@@ -62,7 +62,9 @@ jobs:
             --exclude-module PyQt5 --exclude-module PyQt5.QtCore `
             --exclude-module PyQt5.QtGui --exclude-module PyQt5.QtWidgets `
             --exclude-module PyQt5.QtNetwork `
-            --exclude-module PIL --exclude-module Pillow `
+            --hidden-import PIL --hidden-import PIL.Image `
+            --hidden-import PIL.ImageGrab --hidden-import PIL.ImageTk `
+            --hidden-import PIL._imaging --hidden-import PIL._imagingtk `
             --exclude-module numpy --exclude-module scipy `
             --exclude-module matplotlib --exclude-module pandas `
             --exclude-module unittest --exclude-module test `

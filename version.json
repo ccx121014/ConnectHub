@@ -1,8 +1,8 @@
 {
-  "version": "1.4.14",
-  "release_date": "2026-07-11",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.14/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.14/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.14/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.14 — Misc bug fixes: (1) ignore late AUTH_RESPONSE in app.py once main window shown; (2) server: cleanup old heartbeat on re-auth; (3) server: tolerate send failures during logout"
+  "version": "1.4.15",
+  "release_date": "2026-07-18",
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.15/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.15/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.15/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.15 — Bundle Pillow into client build so screen sharing works out of the box (no separate pip install needed)"
 }
