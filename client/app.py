@@ -368,12 +368,17 @@ class CollaborationApp:
                 pass
             self._ws_client = None
 
-        # 隐藏主窗口
+        # 隐藏主窗口并释放
         if self._main_window is not None:
-            self._main_window.close()
+            try:
+                self._main_window.close()
+            except Exception:
+                pass
+            self._main_window = None
 
         # 重置用户名
         self._username = None
+        self._password = None
         # 重新显示登录对话框
         self._show_login_dialog()
 

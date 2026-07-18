@@ -1,8 +1,8 @@
 {
-  "version": "1.4.15",
+  "version": "1.4.16",
   "release_date": "2026-07-18",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.15/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.15/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.15/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.15 — Bundle Pillow into client build so screen sharing works out of the box (no separate pip install needed)"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.16/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.16/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.16/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.16 — Fix: (1) server broadcasts user online status to all other users on auth, so new users show up in contact list immediately; (2) main window now properly hides on logout and resources are fully cleaned up"
 }

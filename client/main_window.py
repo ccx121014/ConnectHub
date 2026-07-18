@@ -774,6 +774,11 @@ class MainWindow(ttk.Frame):
                 self.master.destroy()
             except Exception:
                 pass
+        elif self.master is not None:
+            try:
+                self.master.withdraw()
+            except Exception:
+                pass
 
     # =========================================================
     # UI 构建
@@ -1111,6 +1116,21 @@ class MainWindow(ttk.Frame):
         if self._chat_tabs is not None:
             try:
                 self._chat_tabs.close_all_chats()
+            except Exception:
+                pass
+        if self._contact_list is not None:
+            try:
+                self._contact_list.clear_contacts()
+            except Exception:
+                pass
+        if self._ft_manager is not None:
+            try:
+                sessions = self._ft_manager.get_all_sessions()
+                for fid in list(sessions.keys()):
+                    try:
+                        self._ft_manager.cancel_transfer(fid)
+                    except Exception:
+                        pass
             except Exception:
                 pass
 

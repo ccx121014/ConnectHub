@@ -328,6 +328,13 @@ class CollaborationServer:
 
         await self._start_heartbeat(username, websocket)
 
+        # 向所有其他在线用户广播该用户上线通知
+        try:
+            status_msg = create_status_message(username, UserStatus.ONLINE)
+            await self._broadcast_to_all_online(status_msg.to_json(), exclude=username)
+        except Exception as exc:
+            logger.warning(f"广播上线通知失败 {username}: {exc}")
+
         logger.info(f"User {username} authenticated successfully")
         return username
 
@@ -876,6 +883,20 @@ class CollaborationServer:
             await websocket.send(response.to_json())
         except Exception as e:
             logger.warning(f"Failed to send error message: {e}")
+
+    async def _broadcast_to_all_online(self, message_json: str, exclude: Optional[str] = None):
+        """向所有在线用户广播消息，可选排除某个用户。"""
+        async with self._global_lock:
+            usernames = list(self._authenticated_clients.keys())
+        for uname in usernames:
+            if exclude is not None and uname == exclude:
+                continue
+            try:
+                ws = self._authenticated_clients.get(uname)
+                if ws is not None:
+                    await ws.send(message_json)
+            except Exception:
+                pass
 
 
 def create_status_message(username: str, status: UserStatus) -> Message:
