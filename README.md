@@ -88,7 +88,7 @@ ConnectHub/
 ├── installer/
 │   ├── installer.nsi          ← NSIS 安装器脚本
 │   └── license.txt            ← 安装向导中的许可证文本
-├── client/                    ← 客户端源码
+├── client/                    ← 客户端源码（tkinter）
 │   ├── app.py                 ← 应用入口
 │   ├── main_window.py         ← 主窗口（聊天/文件/桌面标签页）
 │   ├── websocket_client.py    ← WebSocket 客户端
@@ -98,13 +98,19 @@ ConnectHub/
 │   ├── login_dialog.py        ← 登录对话框
 │   ├── updater.py             ← 自动更新（检查 GitHub Releases）
 │   ├── input_executor.py      ← 远程控制输入执行（Win32 API）
-│   └── ssl_stub.py            ← SSL 兼容层（PyInstaller 用）
+│   ├── ssl_stub.py            ← SSL 兼容层（PyInstaller 用）
+│   ├── start.bat              ← 客户端启动脚本
+│   ├── config.json            ← 客户端配置
+│   └── requirements.txt       ← 客户端依赖
 ├── server/                    ← 服务器源码
 │   ├── main.py                ← WebSocket 服务器主程序
 │   ├── gui.py                 ← 服务器 GUI
 │   ├── user_manager.py        ← 用户管理
 │   ├── chat_history.py        ← 聊天记录持久化
-│   └── webrtc_signaling.py    ← WebRTC 信令服务
+│   ├── webrtc_signaling.py    ← WebRTC 信令服务
+│   ├── start.bat              ← 服务器启动脚本
+│   ├── config.json            ← 服务器配置
+│   └── requirements.txt       ← 服务器依赖
 ├── protocol/                  ← 通信协议
 │   ├── messages.py            ← 消息类型与序列化
 │   └── signals.py             ← 纯 Python 信号系统
