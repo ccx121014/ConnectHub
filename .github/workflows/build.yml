@@ -375,19 +375,26 @@ jobs:
           Write-Host "Client.zip: $cs MB"
           Write-Host "Server.zip: $ss MB"
 
-      - name: Build installer with InnoSetup
+      - name: Build installer with NSIS
         shell: pwsh
         run: |
-          choco install innosetup -y --no-progress
-          $iscc = Get-ChildItem -Path "C:\Program Files (x86)\Inno Setup 6","C:\Program Files\Inno Setup 6" -Filter "iscc.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
-          if (-not $iscc) {
-            Write-Host "iscc not found, searching..."
-            $iscc = Get-ChildItem -Path "C:\" -Filter "iscc.exe" -Recurse -ErrorAction SilentlyContinue -Depth 6 | Select-Object -First 1 -ExpandProperty FullName
+          choco install nsis -y --no-progress
+          $makensis = Get-Command makensis -ErrorAction SilentlyContinue
+          if (-not $makensis) {
+            $nsisDir = Get-ChildItem -Path "C:\Program Files (x86)\NSIS","C:\Program Files\NSIS" -Filter "makensis.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty DirectoryName
+            if ($nsisDir) {
+              $env:PATH = "$nsisDir;$env:PATH"
+            }
+            $makensis = Get-Command makensis -ErrorAction SilentlyContinue
           }
-          Write-Host "Using iscc at: $iscc"
-          & $iscc installer\setup.iss
+          if (-not $makensis) {
+            Write-Host "makensis not found after install"
+            exit 1
+          }
+          Write-Host "Using makensis at: $($makensis.Source)"
+          & makensis installer\installer.nsi
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "InnoSetup build FAILED with exit code $LASTEXITCODE"
+            Write-Host "NSIS build FAILED with exit code $LASTEXITCODE"
             exit 1
           }
           if (Test-Path "ConnectHub-Setup.exe") {
