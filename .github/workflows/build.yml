@@ -451,3 +451,35 @@ jobs:
             }
           }
           Write-Host "`nRelease step complete."
+
+      - name: Sync to Gitee
+        shell: pwsh
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          if (-not $env:GITEE_TOKEN) {
+            Write-Host "GITEE_TOKEN not set, skipping Gitee sync."
+            Write-Host "To enable sync, add GITEE_TOKEN to GitHub Secrets:"
+            Write-Host "  https://gitee.com/profile/personal_access_tokens"
+            exit 0
+          }
+
+          $repo = "ccx121014/ConnectHub"
+          git remote add gitee "https://x-access-token:$env:GITEE_TOKEN@gitee.com/$repo.git" 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            git remote set-url gitee "https://x-access-token:$env:GITEE_TOKEN@gitee.com/$repo.git"
+          }
+
+          Write-Host "Pushing branches to Gitee..."
+          git push gitee main --force
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Branch push failed"
+          }
+
+          Write-Host "Pushing tags to Gitee..."
+          git push gitee --tags --force
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Tag push failed"
+          }
+
+          Write-Host "Gitee sync complete."
