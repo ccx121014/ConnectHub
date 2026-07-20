@@ -56,7 +56,7 @@ class UserManager:
         user_file = os.path.join(self.storage_path, "users.json")
         if os.path.exists(user_file):
             try:
-                with open(user_file, 'r') as f:
+                with open(user_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     for username, user_data in data.items():
                         user = User(
@@ -67,8 +67,8 @@ class UserManager:
                             groups=set(user_data.get("groups", []))
                         )
                         self._users[username] = user
-            except (json.JSONDecodeError, KeyError):
-                pass
+            except (json.JSONDecodeError, KeyError) as exc:
+                logger.warning(f"Failed to load users: {exc}")
 
     def _save_users(self):
         """Save users to storage"""
@@ -81,8 +81,11 @@ class UserManager:
                 "last_seen": user.last_seen,
                 "groups": list(user.groups)
             }
-        with open(user_file, 'w') as f:
-            json.dump(data, f, indent=2)
+        try:
+            with open(user_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+        except Exception as exc:
+            logger.error(f"Failed to save users: {exc}")
 
     async def register_user(self, username: str, websocket: object) -> bool:
         """Register a new user connection"""

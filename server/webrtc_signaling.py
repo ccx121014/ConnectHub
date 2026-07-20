@@ -295,13 +295,16 @@ class SignalingServer:
             return False
 
         target_ws = await self.user_manager.get_connection(target)
-        if not target_ws or not target_ws.open:
+        if not target_ws:
             logger.warning(f"Cannot relay message to offline user: {target}")
+            return False
+        # 兼容不同 websockets 版本的状态属性
+        is_open = getattr(target_ws, "open", None)
+        if is_open is False:
+            logger.warning(f"Cannot relay message to disconnected user: {target}")
             return False
 
         try:
-            import sys
-            sys.path.insert(0, '/workspace')
             from protocol.messages import Message, MessageType
 
             try:

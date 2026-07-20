@@ -113,12 +113,12 @@ class ChatHistory:
         groups_file = os.path.join(self.storage_path, "groups.json")
         if os.path.exists(groups_file):
             try:
-                with open(groups_file, 'r') as f:
+                with open(groups_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     for group_id, group_data in data.items():
                         self._groups[group_id] = Group.from_dict(group_data)
-            except (json.JSONDecodeError, KeyError):
-                pass
+            except (json.JSONDecodeError, KeyError) as exc:
+                logger.warning(f"Failed to load groups: {exc}")
 
     def _save_groups(self):
         """Save groups to storage"""
@@ -127,8 +127,8 @@ class ChatHistory:
             data = {}
             for group_id, group in self._groups.items():
                 data[group_id] = group.to_dict()
-            with open(groups_file, 'w') as f:
-                json.dump(data, f, indent=2)
+            with open(groups_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
         except Exception as exc:
             logger.error(f"Failed to save groups: {exc}")
 
@@ -140,15 +140,15 @@ class ChatHistory:
                 if filename.endswith(".json"):
                     filepath = os.path.join(direct_path, filename)
                     try:
-                        with open(filepath, 'r') as f:
+                        with open(filepath, 'r', encoding='utf-8') as f:
                             messages = json.load(f)
                             for msg_data in messages[-100:]:
                                 msg = ChatMessage.from_dict(msg_data)
                                 key = self._get_dm_key(msg.sender, msg.target)
                                 if key not in self._dm_history or len(self._dm_history[key]) < 100:
                                     self._dm_history[key].append(msg)
-                    except (json.JSONDecodeError, KeyError):
-                        pass
+                    except (json.JSONDecodeError, KeyError) as exc:
+                        logger.warning(f"Failed to load history {filepath}: {exc}")
 
         groups_path = os.path.join(self.storage_path, "groups")
         if os.path.exists(groups_path):
@@ -157,14 +157,14 @@ class ChatHistory:
                     group_id = filename.replace(".json", "")
                     filepath = os.path.join(groups_path, filename)
                     try:
-                        with open(filepath, 'r') as f:
+                        with open(filepath, 'r', encoding='utf-8') as f:
                             messages = json.load(f)
                             for msg_data in messages[-100:]:
                                 msg = ChatMessage.from_dict(msg_data)
                                 if group_id not in self._group_history or len(self._group_history[group_id]) < 100:
                                     self._group_history[group_id].append(msg)
-                    except (json.JSONDecodeError, KeyError):
-                        pass
+                    except (json.JSONDecodeError, KeyError) as exc:
+                        logger.warning(f"Failed to load group history {filepath}: {exc}")
 
     def _get_dm_key(self, user1: str, user2: str) -> str:
         """Generate key for direct message history dictionary"""
@@ -181,8 +181,8 @@ class ChatHistory:
                     filepath = self._get_group_path(message.target)
                     messages = [msg.to_dict() for msg in self._group_history[message.target]]
 
-                    with open(filepath, 'w') as f:
-                        json.dump(messages, f, indent=2)
+                    with open(filepath, 'w', encoding='utf-8') as f:
+                        json.dump(messages, f, indent=2, ensure_ascii=False)
                 else:
                     key = self._get_dm_key(message.sender, message.target)
                     self._dm_history[key].append(message)
@@ -190,11 +190,12 @@ class ChatHistory:
                     filepath = self._get_dm_path(message.sender, message.target)
                     messages = [msg.to_dict() for msg in self._dm_history[key]]
 
-                    with open(filepath, 'w') as f:
-                        json.dump(messages, f, indent=2)
+                    with open(filepath, 'w', encoding='utf-8') as f:
+                        json.dump(messages, f, indent=2, ensure_ascii=False)
 
                 return True
-            except Exception:
+            except Exception as exc:
+                logger.error(f"Failed to save message: {exc}")
                 return False
 
     async def get_history(

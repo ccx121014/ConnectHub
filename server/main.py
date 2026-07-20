@@ -260,7 +260,10 @@ class CollaborationServer:
         ]:
             target = message.target
             if target:
-                await self.user_manager.send_to_user(target, message.to_json())
+                try:
+                    await self.user_manager.send_to_user(target, message.to_json())
+                except Exception as exc:
+                    logger.debug(f"Forward file transfer message failed: {exc}")
 
         # 远程桌面消息 - 直接转发给目标用户
         elif msg_type in [
@@ -277,7 +280,10 @@ class CollaborationServer:
         ]:
             target = message.target
             if target:
-                await self.user_manager.send_to_user(target, message.to_json())
+                try:
+                    await self.user_manager.send_to_user(target, message.to_json())
+                except Exception as exc:
+                    logger.debug(f"Forward desktop message failed: {exc}")
 
         return current_username
 
@@ -321,15 +327,18 @@ class CollaborationServer:
             logger.error(f"发送认证响应失败 {username}: {exc}")
             return None
 
-        user_groups = await self.chat_history.get_user_groups(username)
-        if user_groups:
-            for group in user_groups:
-                group_id = group["group_id"]
-                if group_id not in self._group_members:
-                    self._group_members[group_id] = set()
-                self._group_members[group_id].add(username)
+        try:
+            user_groups = await self.chat_history.get_user_groups(username)
+            if user_groups:
+                for group in user_groups:
+                    group_id = group["group_id"]
+                    if group_id not in self._group_members:
+                        self._group_members[group_id] = set()
+                    self._group_members[group_id].add(username)
 
-                await self.user_manager.add_to_group(username, group_id)
+                    await self.user_manager.add_to_group(username, group_id)
+        except Exception as exc:
+            logger.warning(f"Restore user groups failed for {username}: {exc}")
 
         await self._start_heartbeat(username, websocket)
 
@@ -369,8 +378,15 @@ class CollaborationServer:
         """Handle user disconnection"""
         await self._stop_heartbeat(username)
 
-        await self.signaling_server.close_user_sessions(username)
-        await self.user_manager.unregister_user(username, "disconnect")
+        try:
+            await self.signaling_server.close_user_sessions(username)
+        except Exception as exc:
+            logger.warning(f"Close user sessions failed for {username}: {exc}")
+
+        try:
+            await self.user_manager.unregister_user(username, "disconnect")
+        except Exception as exc:
+            logger.warning(f"Unregister user failed for {username}: {exc}")
 
         async with self._global_lock:
             self._authenticated_clients.pop(username, None)
@@ -378,8 +394,11 @@ class CollaborationServer:
         for group_id in list(self._group_members.keys()):
             self._group_members[group_id].discard(username)
 
-        status_msg = create_status_message(username, UserStatus.OFFLINE)
-        await self.user_manager.broadcast_to_contacts(username, status_msg.to_json())
+        try:
+            status_msg = create_status_message(username, UserStatus.OFFLINE)
+            await self.user_manager.broadcast_to_contacts(username, status_msg.to_json())
+        except Exception as exc:
+            logger.warning(f"Broadcast offline status failed for {username}: {exc}")
 
         logger.info(f"User {username} disconnected")
 
