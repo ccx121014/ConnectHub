@@ -515,15 +515,17 @@ rem 备份旧版本
 if exist "{current_exe_name}.old" del /q "{current_exe_name}.old"
 if exist "{current_exe_name}" ren "{current_exe_name}" "{current_exe_name}.old"
 
-rem 复制新文件
-xcopy /E /I /Y "{extracted_root}\\*" "." >nul
+rem 复制新文件（先尝试 robocopy，失败则回退到 xcopy）
+robocopy "{extracted_root}" "." /E /MOVE /NFL /NDL /NJH /NJS >nul 2>&1
+if %ERRORLEVEL% GEQ 8 (
+    xcopy /E /I /Y "{extracted_root}\\*" "." >nul 2>&1
+)
 
 rem 启动新版本
 start "" "{current_exe_name}"
 
-rem 清理临时文件（延迟删除自身）
-ping 127.0.0.1 -n 3 >nul
-rmdir /s /q "{tmp_dir}" 2>nul
+rem 延迟清理临时文件（bat 退出后再删除）
+start /b cmd /c "ping 127.0.0.1 -n 5 >nul && rmdir /s /q ""{tmp_dir}"" 2>nul"
 """
             with open(bat_path, "w", encoding="utf-8") as f:
                 f.write(bat_content)

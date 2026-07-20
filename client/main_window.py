@@ -393,9 +393,7 @@ class DesktopFrame(ttk.Frame):
         # 检测 Pillow
         self._pil_available = False
         try:
-            import PIL.ImageGrab  # noqa: F401
-            import PIL.Image  # noqa: F401
-            import PIL.ImageTk  # noqa: F401
+            from PIL import ImageGrab, Image, ImageTk  # noqa: F401
             self._pil_available = True
         except Exception:
             self._pil_available = False

@@ -66,6 +66,7 @@ jobs:
             --hidden-import PIL --hidden-import PIL.Image `
             --hidden-import PIL.ImageGrab --hidden-import PIL.ImageTk `
             --hidden-import PIL._imaging --hidden-import PIL._imagingtk `
+            --collect-all PIL `
             --exclude-module numpy --exclude-module scipy `
             --exclude-module matplotlib --exclude-module pandas `
             --exclude-module unittest --exclude-module test `
@@ -236,15 +237,15 @@ jobs:
         shell: pwsh
         run: |
           python -OO -m PyInstaller --noconfirm --clean `
-            --onedir --windowed --strip `
-            --paths . --paths server `
+            --onedir --console --strip `
+            --paths . --paths server --paths client `
             --add-data "protocol;protocol" `
             --add-data "version.json;." `
             --add-data "server/config.json;." `
             --hidden-import websockets --hidden-import user_manager `
             --hidden-import chat_history --hidden-import webrtc_signaling `
             --hidden-import protocol --hidden-import protocol.messages `
-            --hidden-import protocol.signals `
+            --hidden-import protocol.signals --hidden-import main `
             --hidden-import email --hidden-import email.message `
             --hidden-import email.parser --hidden-import email.feedparser `
             --hidden-import email.header --hidden-import email.charset `
