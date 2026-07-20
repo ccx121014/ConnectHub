@@ -19,7 +19,7 @@ _project_root = Path(__file__).parent.parent.resolve()
 _sys.path.insert(0, str(_project_root))
 _sys.path.insert(0, str(Path(__file__).parent))
 
-from protocol.signals import Signal, SignalBridge
+from protocol.signals import SignalBridge
 from protocol.messages import Message, MessageType, parse_message, create_message
 
 logger = logging.getLogger(__name__)

@@ -177,6 +177,16 @@ class FileTransferFrame(ttk.Frame):
         self._ft.transfer_accepted.connect(self._on_accepted)
         self._ft.transfer_rejected.connect(self._on_rejected)
 
+    def stop_all(self):
+        try:
+            self._ft.transfer_progress.disconnect(self._on_progress)
+            self._ft.transfer_completed.disconnect(self._on_completed)
+            self._ft.transfer_error.disconnect(self._on_error)
+            self._ft.transfer_accepted.disconnect(self._on_accepted)
+            self._ft.transfer_rejected.disconnect(self._on_rejected)
+        except Exception:
+            pass
+
     # ---------------------- 外部操作 ----------------------
 
     def refresh_targets(self):
@@ -868,6 +878,20 @@ class MainWindow(ttk.Frame):
 
     def set_websocket_client(self, client):
         """注入 WebSocket 客户端并连接其信号。"""
+        # 先断开旧客户端信号，避免重复连接和内存泄漏
+        old_client = self._ws_client
+        if old_client is not None and hasattr(old_client, "signals"):
+            try:
+                sigs = old_client.signals
+                sigs.connected.disconnect(self._on_ws_connected)
+                sigs.disconnected.disconnect(self._on_ws_disconnected)
+                sigs.error_occurred.disconnect(self._on_ws_error)
+                sigs.message_received.disconnect(self._on_ws_message)
+                sigs.reconnecting.disconnect(self._on_ws_reconnecting)
+                sigs.connection_failed.disconnect(self._on_ws_connection_failed)
+            except Exception:
+                pass
+
         self._ws_client = client
         self._ft_manager.set_websocket_client(client)
         if self._desktop_frame is not None:
@@ -1073,7 +1097,7 @@ class MainWindow(ttk.Frame):
                 self._start_file_transfer_with
             )
             self._contact_list.start_desktop_share.connect(
-                lambda user, _type: self._request_desktop_with(user)
+                self._on_desktop_share_requested
             )
 
         # 聊天 → 发送消息
@@ -1272,6 +1296,11 @@ class MainWindow(ttk.Frame):
                 self._desktop_frame.stop_all()
             except Exception:
                 pass
+        if self._ft_frame is not None:
+            try:
+                self._ft_frame.stop_all()
+            except Exception:
+                pass
         if self._chat_tabs is not None:
             try:
                 self._chat_tabs.close_all_chats()
@@ -1292,6 +1321,50 @@ class MainWindow(ttk.Frame):
                         pass
             except Exception:
                 pass
+
+        try:
+            if self._contact_list is not None:
+                self._contact_list.start_chat_request.disconnect(self._open_chat_with)
+                self._contact_list.contact_double_clicked.disconnect(self._open_chat_with)
+                self._contact_list.start_file_transfer.disconnect(self._start_file_transfer_with)
+                self._contact_list.start_desktop_share.disconnect(self._on_desktop_share_requested)
+        except Exception:
+            pass
+        try:
+            if self._chat_tabs is not None:
+                self._chat_tabs.message_sent.disconnect(self._send_chat_message)
+        except Exception:
+            pass
+        try:
+            self._ft_manager.transfer_requested.disconnect(self._on_transfer_requested)
+        except Exception:
+            pass
+
+        # 断开 WebSocket 客户端信号
+        try:
+            if self._ws_client is not None and hasattr(self._ws_client, "signals"):
+                sigs = self._ws_client.signals
+                sigs.connected.disconnect(self._on_ws_connected)
+                sigs.disconnected.disconnect(self._on_ws_disconnected)
+                sigs.error_occurred.disconnect(self._on_ws_error)
+                sigs.message_received.disconnect(self._on_ws_message)
+                sigs.reconnecting.disconnect(self._on_ws_reconnecting)
+                sigs.connection_failed.disconnect(self._on_ws_connection_failed)
+        except Exception:
+            pass
+
+        # 断开更新器信号
+        try:
+            if getattr(self, "_updater_signals_connected", False):
+                updater = self._updater
+                updater.update_available.disconnect(self._on_update_available)
+                updater.no_update.disconnect(self._on_no_update)
+                updater.download_progress.disconnect(self._on_update_download_progress)
+                updater.update_ready.disconnect(self._on_update_ready)
+                updater.update_error.disconnect(self._on_update_error)
+                self._updater_signals_connected = False
+        except Exception:
+            pass
 
     # =========================================================
     # 事件：联系人 / 聊天 / 文件传输 / 桌面
@@ -1335,6 +1408,9 @@ class MainWindow(ttk.Frame):
                         self._notebook.select(1)
                     except Exception:
                         pass
+
+    def _on_desktop_share_requested(self, user: str, _type: str):
+        self._request_desktop_with(user)
 
     def _request_desktop_with(self, username: str):
         if not username:

@@ -303,7 +303,11 @@ class FileTransferManager(SignalBridge):
         if data_b64 is None:
             data_b64 = getattr(msg_obj, "data", "")
 
-        if file_id is None:
+        if file_id is None or chunk_index is None:
+            if file_id is None:
+                logger.warning("收到无 file_id 的数据 chunk")
+            else:
+                logger.warning(f"收到无 chunk_index 的数据: {file_id}")
             return
 
         session = self.get_session(file_id)

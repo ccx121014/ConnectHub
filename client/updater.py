@@ -10,12 +10,12 @@ import ctypes
 import json
 import logging
 import os
-import shutil
+
 import subprocess
 import sys
 import tempfile
 import threading
-import time
+
 import webbrowser
 from ctypes import wintypes
 from pathlib import Path
@@ -561,7 +561,6 @@ rmdir /s /q "{tmp_dir}" 2>nul
     def _do_show_update_dialog(self, new_version: str, release_url: str):
         try:
             import tkinter as tk
-            from tkinter import messagebox
         except Exception as exc:
             logger.error(f"无法加载 tkinter: {exc}")
             return

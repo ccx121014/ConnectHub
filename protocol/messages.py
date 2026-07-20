@@ -5,7 +5,7 @@ Defines all message types and JSON structures for the collaboration suite.
 
 from enum import Enum
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 import json
 
 
@@ -92,15 +92,27 @@ class Message:
     @classmethod
     def from_json(cls, json_str: str) -> "Message":
         """Create message from JSON string"""
-        data = json.loads(json_str)
-        return cls(
-            type=MessageType(data["type"]),
-            sender=data["sender"],
-            target=data.get("target"),
-            payload=data.get("payload", {}),
-            timestamp=data.get("timestamp"),
-            message_id=data.get("message_id")
-        )
+        try:
+            data = json.loads(json_str)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON: {exc}") from exc
+
+        try:
+            msg_type = MessageType(data["type"])
+        except (KeyError, ValueError) as exc:
+            raise ValueError(f"Invalid message type: {exc}") from exc
+
+        try:
+            return cls(
+                type=msg_type,
+                sender=data["sender"],
+                target=data.get("target"),
+                payload=data.get("payload", {}),
+                timestamp=data.get("timestamp"),
+                message_id=data.get("message_id")
+            )
+        except KeyError as exc:
+            raise ValueError(f"Missing required field: {exc}") from exc
 
 
 @dataclass

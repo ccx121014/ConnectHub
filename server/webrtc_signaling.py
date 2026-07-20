@@ -4,7 +4,7 @@ Handles WebRTC signaling for peer-to-peer connections.
 """
 
 import asyncio
-import json
+
 import time
 from typing import Dict, Optional, Callable, Any
 from dataclasses import dataclass, field
@@ -304,8 +304,14 @@ class SignalingServer:
             sys.path.insert(0, '/workspace')
             from protocol.messages import Message, MessageType
 
+            try:
+                msg_type = MessageType(message["type"])
+            except (KeyError, ValueError) as e:
+                logger.error(f"Invalid relay message type: {e}")
+                return False
+
             msg = Message(
-                type=MessageType(message["type"]),
+                type=msg_type,
                 sender=message["sender"],
                 target=target,
                 payload=message.get("payload", {}),

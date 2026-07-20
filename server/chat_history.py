@@ -4,12 +4,15 @@ Handles persisting and retrieving chat messages.
 """
 
 import json
+import logging
 import os
 import time
 from typing import Dict, List, Optional, Set
 from dataclasses import dataclass, field
 import asyncio
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -119,12 +122,15 @@ class ChatHistory:
 
     def _save_groups(self):
         """Save groups to storage"""
-        groups_file = os.path.join(self.storage_path, "groups.json")
-        data = {}
-        for group_id, group in self._groups.items():
-            data[group_id] = group.to_dict()
-        with open(groups_file, 'w') as f:
-            json.dump(data, f, indent=2)
+        try:
+            groups_file = os.path.join(self.storage_path, "groups.json")
+            data = {}
+            for group_id, group in self._groups.items():
+                data[group_id] = group.to_dict()
+            with open(groups_file, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as exc:
+            logger.error(f"Failed to save groups: {exc}")
 
     def _load_recent_history(self):
         """Load recent history for active conversations"""
@@ -267,8 +273,11 @@ class ChatHistory:
             self._save_groups()
 
             filepath = self._get_group_path(group_id)
-            with open(filepath, 'w') as f:
-                json.dump([], f)
+            try:
+                with open(filepath, 'w') as f:
+                    json.dump([], f)
+            except Exception as exc:
+                logger.error(f"Failed to create group history file: {exc}")
 
             return group
 

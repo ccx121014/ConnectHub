@@ -4,6 +4,12 @@ Handles all WebSocket connections and message routing.
 """
 
 import sys
+from pathlib import Path
+
+# Add project root to path for module imports
+_project_root = Path(__file__).parent.parent.resolve()
+sys.path.insert(0, str(_project_root))
+sys.path.insert(0, str(Path(__file__).parent))
 
 # --- 注入 ssl stub（PyInstaller 排除 OpenSSL 后的最小兼容层）---
 if "ssl" not in sys.modules:
@@ -17,19 +23,18 @@ import logging
 import json
 import time
 import uuid
-import os
-from pathlib import Path
-from typing import Optional, Set, Dict, Any
 
-# Add project root to path for module imports
-_project_root = Path(__file__).parent.parent.resolve()
-sys.path.insert(0, str(_project_root))
-sys.path.insert(0, str(Path(__file__).parent))
+from typing import Optional, Set, Dict
 
 from protocol.messages import Message, MessageType, create_message, parse_message
-from user_manager import UserManager, UserStatus
-from chat_history import ChatHistory, ChatMessage
-from webrtc_signaling import SignalingServer
+try:
+    from user_manager import UserManager, UserStatus
+    from chat_history import ChatHistory, ChatMessage
+    from webrtc_signaling import SignalingServer
+except ImportError:
+    from server.user_manager import UserManager, UserStatus
+    from server.chat_history import ChatHistory, ChatMessage
+    from server.webrtc_signaling import SignalingServer
 
 _config_path = Path(__file__).parent / "config.json"
 _default_config = {
@@ -492,6 +497,9 @@ class CollaborationServer:
         """Handle direct chat message"""
         sender = message.sender
         target = message.target
+        if not target:
+            await self._send_error(websocket, "Target user required", message.message_id)
+            return
         content = message.payload.get("content", "")
         msg_type = message.payload.get("message_type", "text")
 
@@ -712,6 +720,9 @@ class CollaborationServer:
         """Handle group message"""
         sender = message.sender
         group_id = message.target
+        if not group_id:
+            await self._send_error(websocket, "Group ID required", message.message_id)
+            return
         content = message.payload.get("content", "")
         msg_type = message.payload.get("message_type", "text")
 

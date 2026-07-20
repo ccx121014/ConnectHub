@@ -9,7 +9,7 @@ import threading
 import queue
 import asyncio
 import logging
-import time
+
 from pathlib import Path
 from typing import Optional
 

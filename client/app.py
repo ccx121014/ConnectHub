@@ -11,6 +11,11 @@ Application Entry Point for Online Collaboration Suite
 """
 
 import sys
+from pathlib import Path
+
+_project_root = Path(__file__).parent.parent.resolve()
+sys.path.insert(0, str(_project_root))
+sys.path.insert(0, str(Path(__file__).parent))
 
 # --- 注入 ssl stub（PyInstaller 排除 OpenSSL 后的最小兼容层）---
 if "ssl" not in sys.modules:
@@ -23,18 +28,17 @@ import signal as _signal
 import queue
 import threading
 import tkinter as tk
-from tkinter import ttk
-from pathlib import Path
 
-_project_root = Path(__file__).parent.parent.resolve()
-sys.path.insert(0, str(_project_root))
-sys.path.insert(0, str(Path(__file__).parent))
 
-from protocol.signals import Signal, SignalBridge
 from protocol.messages import Message, MessageType, create_message
-from websocket_client import WebSocketClient
-from login_dialog import LoginDialog
-from main_window import MainWindow
+try:
+    from websocket_client import WebSocketClient
+    from login_dialog import LoginDialog
+    from main_window import MainWindow
+except ImportError:
+    from client.websocket_client import WebSocketClient
+    from client.login_dialog import LoginDialog
+    from client.main_window import MainWindow
 
 logging.basicConfig(
     level=logging.INFO,
