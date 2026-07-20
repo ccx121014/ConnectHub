@@ -379,11 +379,25 @@ jobs:
         shell: pwsh
         run: |
           choco install nsis -y --no-progress
+          # 刷新 PATH 以识别新安装的命令
+          $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
+
           $makensis = Get-Command makensis -ErrorAction SilentlyContinue
           if (-not $makensis) {
-            $nsisDir = Get-ChildItem -Path "C:\Program Files (x86)\NSIS","C:\Program Files\NSIS" -Filter "makensis.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty DirectoryName
-            if ($nsisDir) {
-              $env:PATH = "$nsisDir;$env:PATH"
+            $candidates = @(
+              "C:\Program Files (x86)\NSIS",
+              "C:\Program Files\NSIS",
+              "C:\ProgramData\chocolatey\lib\nsis\tools",
+              "C:\tools\nsis"
+            )
+            foreach ($dir in $candidates) {
+              if (Test-Path $dir) {
+                $exe = Get-ChildItem -Path $dir -Filter "makensis.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($exe) {
+                  $env:PATH = "$($exe.DirectoryName);$env:PATH"
+                  break
+                }
+              }
             }
             $makensis = Get-Command makensis -ErrorAction SilentlyContinue
           }
@@ -392,6 +406,15 @@ jobs:
             exit 1
           }
           Write-Host "Using makensis at: $($makensis.Source)"
+
+          # 验证构建产物存在
+          if (-not (Test-Path "dist\ConnectHub-Client\ConnectHub-Client.exe")) {
+            Write-Host "WARNING: dist\ConnectHub-Client not found"
+          }
+          if (-not (Test-Path "dist\ConnectHub-Server\ConnectHub-Server.exe")) {
+            Write-Host "WARNING: dist\ConnectHub-Server not found"
+          }
+
           & makensis installer\installer.nsi
           if ($LASTEXITCODE -ne 0) {
             Write-Host "NSIS build FAILED with exit code $LASTEXITCODE"
