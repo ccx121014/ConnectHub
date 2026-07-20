@@ -1,0 +1,28 @@
+# Windows batch files MUST use CRLF line endings, otherwise cmd.exe
+# misparses them (splits long lines in the middle of words).
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# NSIS installer scripts also need CRLF
+*.nsi text eol=crlf
+*.nsh text eol=crlf
+
+# Windows-specific config
+*.iss text eol=crlf
+
+# Text source files: let git decide (LF in repo, native on checkout)
+*.py text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.txt text eol=lf
+
+# Binary files
+*.exe binary
+*.zip binary
+*.7z binary
+*.png binary
+*.jpg binary
+*.ico binary
