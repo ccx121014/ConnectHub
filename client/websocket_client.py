@@ -428,6 +428,47 @@ class WebSocketClient:
         )
         self.send(msg)
 
+    def send_desktop_mouse_move(self, target: str, x: int, y: int):
+        """发送鼠标移动事件（远程控制）。"""
+        msg = create_message(
+            MessageType.DESKTOP_MOUSE_MOVE,
+            sender=self._username or "",
+            target=target,
+            x=int(x), y=int(y),
+        )
+        self.send(msg)
+
+    def send_desktop_mouse_click(self, target: str, x: int, y: int, button: str = "left"):
+        """发送鼠标按下事件。button: left/right/middle"""
+        msg = create_message(
+            MessageType.DESKTOP_MOUSE_CLICK,
+            sender=self._username or "",
+            target=target,
+            x=int(x), y=int(y), button=button,
+        )
+        self.send(msg)
+
+    def send_desktop_mouse_release(self, target: str, x: int, y: int, button: str = "left"):
+        """发送鼠标释放事件。"""
+        msg = create_message(
+            MessageType.DESKTOP_MOUSE_RELEASE,
+            sender=self._username or "",
+            target=target,
+            x=int(x), y=int(y), button=button,
+        )
+        self.send(msg)
+
+    def send_desktop_keyboard(self, target: str, key_code: int,
+                              key_name: str = "", is_down: bool = True):
+        """发送键盘事件。key_code 在 Windows 上对应 VK code。"""
+        msg = create_message(
+            MessageType.DESKTOP_KEYBOARD,
+            sender=self._username or "",
+            target=target,
+            key_code=int(key_code), key_name=key_name, is_down=bool(is_down),
+        )
+        self.send(msg)
+
     def send_logout(self):
         msg = create_message(
             MessageType.AUTH_LOGOUT,

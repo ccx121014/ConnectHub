@@ -50,6 +50,7 @@ jobs:
             --hidden-import main_window --hidden-import chat_widget `
             --hidden-import contact_list --hidden-import file_transfer `
             --hidden-import login_dialog --hidden-import updater `
+            --hidden-import input_executor `
             --hidden-import protocol.messages --hidden-import protocol.signals `
             --hidden-import protocol --hidden-import _tkinter `
             --hidden-import email --hidden-import email.message `

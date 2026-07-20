@@ -1,8 +1,8 @@
 {
-  "version": "1.4.16",
+  "version": "1.4.17",
   "release_date": "2026-07-18",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.16/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.16/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.16/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.16 — Fix: (1) server broadcasts user online status to all other users on auth, so new users show up in contact list immediately; (2) main window now properly hides on logout and resources are fully cleaned up"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.17/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.17/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.17/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.17 — Remote desktop control: view + control remote screen. Uses ctypes Win32 API (zero extra deps) for mouse/keyboard injection. JPEG quality 60->82, resolution 960x540->1280x720, framerate 5fps->8fps, LANCZOS scaling for sharper image. Added 'allow remote control' checkbox."
 }

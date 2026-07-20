@@ -37,6 +37,7 @@ from client.contact_list import ContactListWidget
 from client.chat_widget import ChatTabWidget
 from client.file_transfer import FileTransferManager
 from client.updater import Updater
+from client import input_executor
 
 logger = logging.getLogger(__name__)
 
@@ -373,6 +374,12 @@ class DesktopFrame(ttk.Frame):
         self._frame_refs: List[Any] = []  # 防止 PhotoImage 被 GC
         self._sharer_target: Optional[str] = None  # 正在请求我屏幕的用户
 
+        # 远程控制相关
+        self._viewing_target: Optional[str] = None  # 我正在查看谁的屏幕（作为查看方）
+        self._allow_control = tk.BooleanVar(value=True)  # 作为被控方是否允许对方控制
+        self._last_image_rect: Optional[tuple] = None  # (x, y, w, h) 图片在 canvas 上的实际显示矩形
+        self._last_screen_size: tuple = (0, 0)  # 对方屏幕原始尺寸 (w, h)
+
         # 检测 Pillow
         self._pil_available = False
         try:
@@ -384,6 +391,7 @@ class DesktopFrame(ttk.Frame):
             self._pil_available = False
 
         self._init_ui()
+        self._bind_control_events()
 
     # ---------------------- UI ----------------------
 
@@ -406,18 +414,25 @@ class DesktopFrame(ttk.Frame):
         self._stop_btn = ttk.Button(
             top, text="停止共享", command=self._on_stop, state="disabled"
         )
-        self._stop_btn.pack(side="left")
+        self._stop_btn.pack(side="left", padx=(0, 8))
+
+        # 允许远程控制复选框（作为被控方）
+        self._control_chk = ttk.Checkbutton(
+            top, text="允许远程控制", variable=self._allow_control
+        )
+        self._control_chk.pack(side="left")
 
         self._status_var = tk.StringVar(value="就绪")
         ttk.Label(self, textvariable=self._status_var,
                   anchor="w", padding=(8, 4)).pack(fill="x")
 
-        # 显示区：大 Label，绑定 resize
+        # 显示区：大 Canvas，绑定 resize
         self._display_container = ttk.Frame(self, relief="sunken", padding=4)
         self._display_container.pack(fill="both", expand=True, padx=8, pady=(0, 8))
 
         self._display_canvas = tk.Canvas(
-            self._display_container, bg="#1E1E1E", highlightthickness=0
+            self._display_container, bg="#1E1E1E", highlightthickness=0,
+            cursor="hand1" if input_executor.is_supported() else "arrow",
         )
         self._display_canvas.pack(fill="both", expand=True)
         self._canvas_image_id = self._display_canvas.create_text(
@@ -434,6 +449,32 @@ class DesktopFrame(ttk.Frame):
                      "可使用 `pip install Pillow` 安装。",
                 foreground="#B71C1C", padding=(8, 4), anchor="w"
             ).pack(fill="x")
+
+        # 控制能力提示
+        if not input_executor.is_supported():
+            ttk.Label(
+                self,
+                text="提示：当前平台不支持远程控制执行（仅 Windows 可用）。",
+                foreground="#E65100", padding=(8, 4), anchor="w"
+            ).pack(fill="x")
+
+    def _bind_control_events(self):
+        """在显示 Canvas 上绑定鼠标/键盘事件，用于远程控制。"""
+        c = self._display_canvas
+        # 鼠标移动（仅在没有按键按下时）
+        c.bind("<Motion>", self._on_canvas_motion)
+        # 鼠标按下 / 释放
+        c.bind("<Button-1>", lambda e: self._on_canvas_click(e, "left", down=True))
+        c.bind("<ButtonRelease-1>", lambda e: self._on_canvas_click(e, "left", down=False))
+        c.bind("<Button-3>", lambda e: self._on_canvas_click(e, "right", down=True))
+        c.bind("<ButtonRelease-3>", lambda e: self._on_canvas_click(e, "right", down=False))
+        c.bind("<Button-2>", lambda e: self._on_canvas_click(e, "middle", down=True))
+        c.bind("<ButtonRelease-2>", lambda e: self._on_canvas_click(e, "middle", down=False))
+        # 键盘
+        c.bind("<KeyPress>", self._on_canvas_key_down)
+        c.bind("<KeyRelease>", self._on_canvas_key_up)
+        # 让 canvas 可聚焦以接收键盘
+        c.configure(takefocus=True)
 
     def _show_message(self, text: str):
         self._display_canvas.delete("all")
@@ -483,9 +524,116 @@ class DesktopFrame(ttk.Frame):
     def set_status(self, status: str):
         self._run_ui(lambda: self._status_var.set(status))
 
+    def set_viewing_target(self, target: Optional[str]):
+        """设置当前正在查看谁的屏幕（作为查看方 / 控制方）。"""
+        self._viewing_target = target
+        if target:
+            try:
+                self._display_canvas.focus_set()
+            except Exception:
+                pass
+
+    def allow_remote_control(self) -> bool:
+        """是否允许对方远程控制本机。"""
+        try:
+            return bool(self._allow_control.get())
+        except Exception:
+            return False
+
     def stop_all(self):
         self._stop_capture_loop()
+        self._viewing_target = None
+        self._last_image_rect = None
         self._run_ui(lambda: self._status_var.set("已停止"))
+
+    # ---------------------- 控制事件 → 发送给对端 ----------------------
+
+    def _scale_to_screen(self, canvas_x: int, canvas_y: int) -> Optional[tuple]:
+        """把 Canvas 坐标换算为对端屏幕原始坐标。"""
+        rect = self._last_image_rect
+        if not rect:
+            return None
+        ix, iy, iw, ih = rect
+        if iw <= 0 or ih <= 0:
+            return None
+        # 限制在图片范围内
+        cx = max(0, min(canvas_x - ix, iw))
+        cy = max(0, min(canvas_y - iy, ih))
+        sw, sh = self._last_screen_size
+        if sw <= 0 or sh <= 0:
+            return None
+        sx = int(cx * sw / iw)
+        sy = int(cy * sh / ih)
+        return sx, sy
+
+    def _on_canvas_motion(self, event):
+        if not self._viewing_target or self._ws is None:
+            return
+        scaled = self._scale_to_screen(event.x, event.y)
+        if scaled is None:
+            return
+        try:
+            self._ws.send_desktop_mouse_move(self._viewing_target, scaled[0], scaled[1])
+        except Exception:
+            pass
+
+    def _on_canvas_click(self, event, button: str, down: bool):
+        if not self._viewing_target or self._ws is None:
+            return
+        scaled = self._scale_to_screen(event.x, event.y)
+        if scaled is None:
+            return
+        try:
+            if down:
+                self._ws.send_desktop_mouse_click(
+                    self._viewing_target, scaled[0], scaled[1], button)
+            else:
+                self._ws.send_desktop_mouse_release(
+                    self._viewing_target, scaled[0], scaled[1], button)
+        except Exception:
+            pass
+
+    def _on_canvas_key_down(self, event):
+        self._send_key(event, is_down=True)
+
+    def _on_canvas_key_up(self, event):
+        self._send_key(event, is_down=False)
+
+    def _send_key(self, event, is_down: bool):
+        if not self._viewing_target or self._ws is None:
+            return
+        # tkinter event.keycode 在 Windows 上即为 VK code
+        key_code = int(getattr(event, "keycode", 0) or 0)
+        if key_code <= 0:
+            return
+        key_name = str(getattr(event, "keysym", "") or "")
+        try:
+            self._ws.send_desktop_keyboard(
+                self._viewing_target, key_code, key_name, is_down)
+        except Exception:
+            pass
+
+    # ---------------------- 接收对端控制指令 → 本地执行 ----------------------
+
+    def execute_mouse_move(self, x: int, y: int):
+        if not self.allow_remote_control():
+            return
+        input_executor.move_mouse(x, y)
+
+    def execute_mouse_click(self, x: int, y: int, button: str = "left"):
+        if not self.allow_remote_control():
+            return
+        input_executor.mouse_down(x, y, button)
+
+    def execute_mouse_release(self, x: int, y: int, button: str = "left"):
+        if not self.allow_remote_control():
+            return
+        input_executor.mouse_up(x, y, button)
+
+    def execute_key(self, key_code: int, is_down: bool = True):
+        if not self.allow_remote_control():
+            return
+        input_executor.key_event(key_code, is_down)
 
     # ---------------------- 内部事件 ----------------------
 
@@ -540,8 +688,8 @@ class DesktopFrame(ttk.Frame):
             self._capture_and_send()
         except Exception as exc:
             logger.debug(f"屏幕截图/发送异常: {exc}")
-        # 每 200ms 一帧
-        self.after(200, self._schedule_capture)
+        # 每 120ms 一帧（约 8fps，平衡流畅度与带宽）
+        self.after(120, self._schedule_capture)
 
     def _capture_and_send(self):
         if not self._pil_available or not self._capturing:
@@ -551,17 +699,17 @@ class DesktopFrame(ttk.Frame):
         try:
             from PIL import ImageGrab, Image
             screen = ImageGrab.grab()
-            # 压缩尺寸，降低传输带宽
-            max_w, max_h = 960, 540
+            # 压缩尺寸，降低传输带宽（保持较高清晰度）
+            max_w, max_h = 1280, 720
             orig_w, orig_h = screen.size
             ratio = min(max_w / orig_w, max_h / orig_h, 1.0)
             if ratio < 1.0:
                 screen = screen.resize(
-                    (int(orig_w * ratio), int(orig_h * ratio)), Image.NEAREST
+                    (int(orig_w * ratio), int(orig_h * ratio)), Image.LANCZOS
                 )
-            # JPEG 压缩到内存
+            # JPEG 压缩到内存（提高 quality 让画面更清晰）
             buf = io.BytesIO()
-            screen.convert("RGB").save(buf, format="JPEG", quality=60)
+            screen.convert("RGB").save(buf, format="JPEG", quality=82)
             b64 = base64.b64encode(buf.getvalue()).decode("ascii")
             self._ws.send_desktop_frame(self._sharer_target, b64,
                                         screen.size[0], screen.size[1])
@@ -584,19 +732,25 @@ class DesktopFrame(ttk.Frame):
             logger.debug(f"base64 解码失败: {exc}")
             return
 
+        # 记录对端屏幕原始尺寸（用于控制坐标换算）
+        if width and height:
+            self._last_screen_size = (int(width), int(height))
+
         # 尝试用 Pillow 解码 JPEG；否则退化为二进制显示
         photo = None
+        disp_w = disp_h = 0
         try:
             if self._pil_available:
                 from PIL import Image, ImageTk
                 pil = Image.open(io.BytesIO(img_bytes))
-                # 根据 Canvas 尺寸做缩放
+                # 根据 Canvas 尺寸做缩放（用 LANCZOS 提升清晰度）
                 cw = max(self._display_canvas.winfo_width(), 100)
                 ch = max(self._display_canvas.winfo_height(), 100)
                 iw, ih = pil.size
                 ratio = min(cw / iw, ch / ih, 1.0) if iw and ih else 1.0
                 if ratio < 1.0:
-                    pil = pil.resize((int(iw * ratio), int(ih * ratio)), Image.NEAREST)
+                    pil = pil.resize((int(iw * ratio), int(ih * ratio)), Image.LANCZOS)
+                disp_w, disp_h = pil.size
                 photo = ImageTk.PhotoImage(pil)
         except Exception as exc:
             logger.debug(f"帧解码失败: {exc}")
@@ -607,9 +761,14 @@ class DesktopFrame(ttk.Frame):
 
         # 更新 Canvas
         self._display_canvas.delete("all")
-        cx = self._display_canvas.winfo_width() // 2
-        cy = self._display_canvas.winfo_height() // 2
-        self._display_canvas.create_image(cx, cy, image=photo, anchor="center")
+        cw = max(self._display_canvas.winfo_width(), 100)
+        ch = max(self._display_canvas.winfo_height(), 100)
+        # 居中显示
+        ix = (cw - disp_w) // 2
+        iy = (ch - disp_h) // 2
+        self._display_canvas.create_image(ix, iy, image=photo, anchor="nw")
+        # 记录图片在 canvas 上的实际矩形，用于控制坐标换算
+        self._last_image_rect = (ix, iy, disp_w, disp_h)
 
         # 保持引用，避免被 GC
         self._frame_refs.append(photo)
@@ -1335,6 +1494,15 @@ class MainWindow(ttk.Frame):
                     self._handle_desktop_frame,
                 MessageType.DESKTOP_STOP.value:
                     self._handle_desktop_stop,
+                # 远程桌面控制
+                MessageType.DESKTOP_MOUSE_MOVE.value:
+                    self._handle_desktop_mouse_move,
+                MessageType.DESKTOP_MOUSE_CLICK.value:
+                    self._handle_desktop_mouse_click,
+                MessageType.DESKTOP_MOUSE_RELEASE.value:
+                    self._handle_desktop_mouse_release,
+                MessageType.DESKTOP_KEYBOARD.value:
+                    self._handle_desktop_keyboard,
 
                 # 用户列表
                 MessageType.USER_LIST_RESPONSE.value:
@@ -1422,11 +1590,13 @@ class MainWindow(ttk.Frame):
                    getattr(msg, "accepted", False)
         sender = getattr(msg, "sender", "")
         if accepted and sender and self._desktop_frame is not None:
-            # 对方接受了我的请求 → 如果我是请求看对方屏幕，等对方发帧
+            # 对方接受了我的请求 → 我是查看方，记录目标以便发送控制指令
+            self._desktop_frame.set_viewing_target(sender)
             self._desktop_frame.set_status(f"已连接到 {sender}，等待画面...")
             self._switch_to_desktop_tab()
         else:
             if self._desktop_frame is not None:
+                self._desktop_frame.set_viewing_target(None)
                 self._desktop_frame.set_status(f"{sender} 拒绝了请求")
 
     def _handle_desktop_frame(self, msg: Message):
@@ -1444,6 +1614,62 @@ class MainWindow(ttk.Frame):
         if self._desktop_frame is not None:
             self._desktop_frame.set_status(f"{sender} 停止了共享")
             self._desktop_frame.stop_all()
+
+    def _handle_desktop_mouse_move(self, msg: Message):
+        if self._desktop_frame is None:
+            return
+        payload = getattr(msg, "payload", None) or {}
+        if not isinstance(payload, dict):
+            return
+        x = int(payload.get("x", 0) or 0)
+        y = int(payload.get("y", 0) or 0)
+        try:
+            self._desktop_frame.execute_mouse_move(x, y)
+        except Exception as exc:
+            logger.debug(f"执行鼠标移动失败: {exc}")
+
+    def _handle_desktop_mouse_click(self, msg: Message):
+        if self._desktop_frame is None:
+            return
+        payload = getattr(msg, "payload", None) or {}
+        if not isinstance(payload, dict):
+            return
+        x = int(payload.get("x", 0) or 0)
+        y = int(payload.get("y", 0) or 0)
+        button = str(payload.get("button", "left") or "left")
+        try:
+            self._desktop_frame.execute_mouse_click(x, y, button)
+        except Exception as exc:
+            logger.debug(f"执行鼠标按下失败: {exc}")
+
+    def _handle_desktop_mouse_release(self, msg: Message):
+        if self._desktop_frame is None:
+            return
+        payload = getattr(msg, "payload", None) or {}
+        if not isinstance(payload, dict):
+            return
+        x = int(payload.get("x", 0) or 0)
+        y = int(payload.get("y", 0) or 0)
+        button = str(payload.get("button", "left") or "left")
+        try:
+            self._desktop_frame.execute_mouse_release(x, y, button)
+        except Exception as exc:
+            logger.debug(f"执行鼠标释放失败: {exc}")
+
+    def _handle_desktop_keyboard(self, msg: Message):
+        if self._desktop_frame is None:
+            return
+        payload = getattr(msg, "payload", None) or {}
+        if not isinstance(payload, dict):
+            return
+        key_code = int(payload.get("key_code", 0) or 0)
+        is_down = bool(payload.get("is_down", True))
+        if key_code <= 0:
+            return
+        try:
+            self._desktop_frame.execute_key(key_code, is_down)
+        except Exception as exc:
+            logger.debug(f"执行键盘事件失败: {exc}")
 
     def _switch_to_desktop_tab(self):
         if self._notebook is None:
