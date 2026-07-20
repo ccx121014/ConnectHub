@@ -140,11 +140,19 @@ jobs:
             --exclude-module encodings.ptcp154 --exclude-module encodings.shift_jis `
             --exclude-module encodings.shift_jis_2004 --exclude-module encodings.shift_jisx0213 `
             --name ConnectHub-Client `
-            client/app.py
+            client/app.py > client-pyinstaller.log 2>&1
+
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "Client build FAILED"
+            Write-Host "Client build FAILED — tail of client-pyinstaller.log"
+            Get-Content client-pyinstaller.log -Tail 200
             exit 1
           }
+          if (-not (Test-Path "dist\ConnectHub-Client\ConnectHub-Client.exe")) {
+            Write-Host "Client exe not found — tail of log"
+            Get-Content client-pyinstaller.log -Tail 200
+            exit 1
+          }
+          Write-Host "Client build OK"
           # UPX --ultra-brute on every .dll/.pyd in the onedir folder.
           # Files are uncompressed (no --upx-dir above), so UPX compresses from scratch.
           # Reset $LASTEXITCODE after loop — UPX may return non-zero for files it can't shrink.
@@ -307,11 +315,19 @@ jobs:
             --exclude-module encodings.shift_jis_2004 --exclude-module encodings.shift_jisx0213 `
             --hidden-import _tkinter `
             --name ConnectHub-Server `
-            server/gui.py
+            server/gui.py > server-pyinstaller.log 2>&1
+
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "Server build FAILED"
+            Write-Host "Server build FAILED — tail of server-pyinstaller.log"
+            Get-Content server-pyinstaller.log -Tail 200
             exit 1
           }
+          if (-not (Test-Path "dist\ConnectHub-Server\ConnectHub-Server.exe")) {
+            Write-Host "Server exe not found — tail of log"
+            Get-Content server-pyinstaller.log -Tail 200
+            exit 1
+          }
+          Write-Host "Server build OK"
           $upxExe = "$env:UPX_DIR\upx.exe"
           Get-ChildItem -Path "dist\ConnectHub-Server" -Recurse -Include "*.dll","*.pyd" | ForEach-Object {
             $before = $_.Length
@@ -379,24 +395,20 @@ jobs:
         shell: pwsh
         run: |
           choco install nsis -y --no-progress
-          # 刷新 PATH 以识别新安装的命令
+          # 刷新 PATH
           $env:PATH = [System.Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("PATH","User")
 
           $makensis = Get-Command makensis -ErrorAction SilentlyContinue
           if (-not $makensis) {
             $candidates = @(
-              "C:\Program Files (x86)\NSIS",
-              "C:\Program Files\NSIS",
-              "C:\ProgramData\chocolatey\lib\nsis\tools",
-              "C:\tools\nsis"
+              "C:\Program Files (x86)\NSIS\makensis.exe",
+              "C:\Program Files\NSIS\makensis.exe",
+              "C:\ProgramData\chocolatey\lib\nsis\tools\makensis.exe"
             )
-            foreach ($dir in $candidates) {
-              if (Test-Path $dir) {
-                $exe = Get-ChildItem -Path $dir -Filter "makensis.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($exe) {
-                  $env:PATH = "$($exe.DirectoryName);$env:PATH"
-                  break
-                }
+            foreach ($p in $candidates) {
+              if (Test-Path $p) {
+                $env:PATH = "$([System.IO.Path]::GetDirectoryName($p));$env:PATH"
+                break
               }
             }
             $makensis = Get-Command makensis -ErrorAction SilentlyContinue
@@ -407,26 +419,46 @@ jobs:
           }
           Write-Host "Using makensis at: $($makensis.Source)"
 
-          # 验证构建产物存在
+          # 验证构建产物
           if (-not (Test-Path "dist\ConnectHub-Client\ConnectHub-Client.exe")) {
-            Write-Host "WARNING: dist\ConnectHub-Client not found"
+            Write-Host "ERROR: dist\ConnectHub-Client\ConnectHub-Client.exe not found"
+            Get-ChildItem dist -Recurse -ErrorAction SilentlyContinue | Select-Object FullName | Format-Table -AutoSize
+            exit 1
           }
           if (-not (Test-Path "dist\ConnectHub-Server\ConnectHub-Server.exe")) {
-            Write-Host "WARNING: dist\ConnectHub-Server not found"
+            Write-Host "ERROR: dist\ConnectHub-Server\ConnectHub-Server.exe not found"
+            exit 1
           }
 
-          & makensis installer\installer.nsi
+          Write-Host "CWD: $(Get-Location)"
+          Write-Host "dist folder listing:"
+          Get-ChildItem dist -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
+
+          & makensis installer\installer.nsi > nsis-build.log 2>&1
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "NSIS build FAILED with exit code $LASTEXITCODE"
+            Write-Host "NSIS build FAILED — tail of nsis-build.log"
+            Get-Content nsis-build.log -Tail 200
             exit 1
           }
           if (Test-Path "ConnectHub-Setup.exe") {
             $size = [math]::Round((Get-Item "ConnectHub-Setup.exe").Length / 1MB, 2)
             Write-Host "SUCCESS: ConnectHub-Setup.exe = $size MB"
           } else {
-            Write-Host "ERROR: No installer found"
+            Write-Host "ERROR: No installer found — tail of nsis-build.log"
+            Get-Content nsis-build.log -Tail 200
+            Get-ChildItem -Recurse | Select-Object FullName, Length | Format-Table -AutoSize
             exit 1
           }
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            client-pyinstaller.log
+            server-pyinstaller.log
+            nsis-build.log
 
       - name: Create Release
         shell: pwsh
