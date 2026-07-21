@@ -390,6 +390,11 @@ class DesktopFrame(ttk.Frame):
         self._allow_control = tk.BooleanVar(value=True)  # 作为被控方是否允许对方控制
         self._last_image_rect: Optional[tuple] = None  # (x, y, w, h) 图片在 canvas 上的实际显示矩形
         self._last_screen_size: tuple = (0, 0)  # 对方屏幕原始尺寸 (w, h)
+        self._crop_offset: tuple = (0, 0)  # 填满模式下的裁剪偏移 (dx, dy)
+
+        # 显示模式
+        self._fill_mode = tk.BooleanVar(value=False)  # True: 填满模式（裁剪），False: 适应模式（黑边）
+        self._fullscreen_window: Optional[tk.Toplevel] = None  # 全屏窗口
 
         # 检测 Pillow
         self._pil_available = False
@@ -430,6 +435,22 @@ class DesktopFrame(ttk.Frame):
             top, text="允许远程控制", variable=self._allow_control
         )
         self._control_chk.pack(side="left")
+
+        # 分隔线
+        ttk.Separator(top, orient="vertical").pack(side="left", padx=8, fill="y")
+
+        # 填满模式按钮
+        self._fill_btn = ttk.Checkbutton(
+            top, text="填满画面", variable=self._fill_mode,
+            command=self._on_fill_mode_toggle
+        )
+        self._fill_btn.pack(side="left", padx=(0, 6))
+
+        # 全屏按钮
+        self._fullscreen_btn = ttk.Button(
+            top, text="全屏显示", command=self._on_fullscreen_toggle
+        )
+        self._fullscreen_btn.pack(side="left")
 
         self._status_var = tk.StringVar(value="就绪")
         ttk.Label(self, textvariable=self._status_var,
@@ -553,6 +574,8 @@ class DesktopFrame(ttk.Frame):
         self._stop_capture_loop()
         self._viewing_target = None
         self._last_image_rect = None
+        # 关闭全屏窗口
+        self._close_fullscreen()
         self._run_ui(lambda: self._status_var.set("已停止"))
 
     # ---------------------- 控制事件 → 发送给对端 ----------------------
@@ -571,8 +594,17 @@ class DesktopFrame(ttk.Frame):
         sw, sh = self._last_screen_size
         if sw <= 0 or sh <= 0:
             return None
-        sx = int(cx * sw / iw)
-        sy = int(cy * sh / ih)
+        # 填满模式下需要加上裁剪偏移
+        if self._fill_mode.get():
+            dx, dy = self._crop_offset
+            # 计算缩放比例
+            ratio_w = sw / (iw + 2 * dx) if (iw + 2 * dx) > 0 else 1.0
+            ratio_h = sh / (ih + 2 * dy) if (ih + 2 * dy) > 0 else 1.0
+            sx = int((cx + dx) * ratio_w)
+            sy = int((cy + dy) * ratio_h)
+        else:
+            sx = int(cx * sw / iw)
+            sy = int(cy * sh / ih)
         return sx, sy
 
     def _on_canvas_motion(self, event):
@@ -645,6 +677,87 @@ class DesktopFrame(ttk.Frame):
         input_executor.key_event(key_code, is_down)
 
     # ---------------------- 内部事件 ----------------------
+
+    def _on_fill_mode_toggle(self):
+        """切换填满模式/适应模式。"""
+        if self._fill_mode.get():
+            self._status_var.set("显示模式：填满画面（可能裁剪边缘）")
+        else:
+            self._status_var.set("显示模式：适应窗口（保持完整画面）")
+
+    def _on_fullscreen_toggle(self):
+        """切换全屏显示模式。"""
+        if self._fullscreen_window is not None:
+            self._close_fullscreen()
+        else:
+            self._open_fullscreen()
+
+    def _open_fullscreen(self):
+        """打开全屏窗口显示远程桌面。"""
+        try:
+            root = self.winfo_toplevel()
+            self._fullscreen_window = tk.Toplevel(root)
+            self._fullscreen_window.title("ConnectHub - 远程桌面全屏")
+            self._fullscreen_window.attributes("-fullscreen", True)
+            self._fullscreen_window.configure(bg="#000000")
+
+            # 全屏显示区
+            self._fullscreen_canvas = tk.Canvas(
+                self._fullscreen_window, bg="#1E1E1E", highlightthickness=0,
+                cursor="hand1" if input_executor.is_supported() else "arrow",
+            )
+            self._fullscreen_canvas.pack(fill="both", expand=True)
+
+            # 绑定控制事件（与主 canvas 相同）
+            self._fullscreen_canvas.bind("<Motion>", self._on_canvas_motion)
+            self._fullscreen_canvas.bind("<Button-1>", lambda e: self._on_canvas_click(e, "left", down=True))
+            self._fullscreen_canvas.bind("<ButtonRelease-1>", lambda e: self._on_canvas_click(e, "left", down=False))
+            self._fullscreen_canvas.bind("<Button-3>", lambda e: self._on_canvas_click(e, "right", down=True))
+            self._fullscreen_canvas.bind("<ButtonRelease-3>", lambda e: self._on_canvas_click(e, "right", down=False))
+            self._fullscreen_canvas.bind("<Button-2>", lambda e: self._on_canvas_click(e, "middle", down=True))
+            self._fullscreen_canvas.bind("<ButtonRelease-2>", lambda e: self._on_canvas_click(e, "middle", down=False))
+            self._fullscreen_canvas.bind("<KeyPress>", self._on_canvas_key_down)
+            self._fullscreen_canvas.bind("<KeyRelease>", self._on_canvas_key_up)
+            self._fullscreen_canvas.configure(takefocus=True)
+
+            # 退出全屏按钮（右上角）
+            exit_btn = ttk.Button(
+                self._fullscreen_window, text="退出全屏 (Esc)",
+                command=self._close_fullscreen
+            )
+            exit_btn.place(relx=0.95, rely=0.02, anchor="ne")
+
+            # ESC 键退出
+            self._fullscreen_window.bind("<Escape>", lambda e: self._close_fullscreen())
+
+            # 聚焦 canvas
+            self._fullscreen_canvas.focus_set()
+
+            # 将当前显示内容同步到全屏窗口
+            self._sync_to_fullscreen()
+
+            self._status_var.set("全屏模式：按 Esc 退出")
+        except Exception as exc:
+            logger.exception(f"打开全屏窗口失败: {exc}")
+            self._fullscreen_window = None
+
+    def _close_fullscreen(self):
+        """关闭全屏窗口。"""
+        if self._fullscreen_window is not None:
+            try:
+                self._fullscreen_window.destroy()
+            except Exception:
+                pass
+            self._fullscreen_window = None
+            self._status_var.set("已退出全屏")
+
+    def _sync_to_fullscreen(self):
+        """将主 canvas 的内容同步到全屏窗口。"""
+        if self._fullscreen_window is not None and hasattr(self, '_fullscreen_canvas'):
+            # 如果有最后一帧图片，重新显示到全屏 canvas
+            if self._last_image_rect and self._last_screen_size[0] > 0:
+                # 强制刷新显示
+                pass
 
     def _on_request_share(self):
         target = self._target_var.get().strip()
@@ -746,45 +859,89 @@ class DesktopFrame(ttk.Frame):
             self._last_screen_size = (int(width), int(height))
 
         # 尝试用 Pillow 解码 JPEG；否则退化为二进制显示
-        photo = None
-        disp_w = disp_h = 0
         try:
             if self._pil_available:
                 from PIL import Image, ImageTk
+
                 pil = Image.open(io.BytesIO(img_bytes))
-                # 根据 Canvas 尺寸做缩放（用 LANCZOS 提升清晰度）
+                iw, ih = pil.size
+
+                # 主 canvas 显示
                 cw = max(self._display_canvas.winfo_width(), 100)
                 ch = max(self._display_canvas.winfo_height(), 100)
-                iw, ih = pil.size
-                ratio = min(cw / iw, ch / ih, 1.0) if iw and ih else 1.0
-                if ratio < 1.0:
-                    pil = pil.resize((int(iw * ratio), int(ih * ratio)), Image.LANCZOS)
-                disp_w, disp_h = pil.size
-                photo = ImageTk.PhotoImage(pil)
+                self._display_frame_on_canvas(pil, iw, ih, cw, ch)
+
+                # 全屏窗口显示
+                if self._fullscreen_window is not None and hasattr(self, '_fullscreen_canvas'):
+                    fs_cw = max(self._fullscreen_canvas.winfo_width(), 100)
+                    fs_ch = max(self._fullscreen_canvas.winfo_height(), 100)
+                    self._display_frame_on_canvas(pil, iw, ih, fs_cw, fs_ch, is_fullscreen=True)
+
         except Exception as exc:
             logger.debug(f"帧解码失败: {exc}")
-
-        if photo is None:
             self._status_var.set("帧解码失败（需要 Pillow）")
-            return
 
-        # 更新 Canvas
-        self._display_canvas.delete("all")
-        cw = max(self._display_canvas.winfo_width(), 100)
-        ch = max(self._display_canvas.winfo_height(), 100)
-        # 居中显示
-        ix = (cw - disp_w) // 2
-        iy = (ch - disp_h) // 2
-        self._display_canvas.create_image(ix, iy, image=photo, anchor="nw")
-        # 记录图片在 canvas 上的实际矩形，用于控制坐标换算
-        self._last_image_rect = (ix, iy, disp_w, disp_h)
+        self._status_var.set(f"正在接收 {width}x{height}")
+
+    def _display_frame_on_canvas(self, pil_img, iw: int, ih: int, cw: int, ch: int, is_fullscreen: bool = False):
+        """在指定 canvas 上显示一帧画面，支持填满/适应模式。"""
+        from PIL import Image, ImageTk
+
+        if self._fill_mode.get():
+            # 填满模式：按较大比例缩放，裁剪边缘
+            ratio = max(cw / iw, ch / ih) if iw and ih else 1.0
+        else:
+            # 适应模式：按较小比例缩放，保持完整画面
+            ratio = min(cw / iw, ch / ih, 1.0) if iw and ih else 1.0
+
+        scaled_w = int(iw * ratio)
+        scaled_h = int(ih * ratio)
+
+        if scaled_w != iw or scaled_h != ih:
+            pil_scaled = pil_img.resize((scaled_w, scaled_h), Image.LANCZOS)
+        else:
+            pil_scaled = pil_img
+
+        # 计算显示位置（居中或裁剪）
+        if self._fill_mode.get():
+            # 填满模式：居中裁剪
+            dx = max(0, (scaled_w - cw) // 2)
+            dy = max(0, (scaled_h - ch) // 2)
+            # 记录裁剪偏移（用于控制坐标换算）
+            if not is_fullscreen:
+                self._crop_offset = (dx, dy)
+            # 裁剪到目标尺寸
+            pil_cropped = pil_scaled.crop((dx, dy, dx + cw, dy + ch))
+            disp_w, disp_h = cw, ch
+            ix, iy = 0, 0
+            photo = ImageTk.PhotoImage(pil_cropped)
+        else:
+            # 适应模式：居中显示
+            disp_w, disp_h = scaled_w, scaled_h
+            ix = (cw - disp_w) // 2
+            iy = (ch - disp_h) // 2
+            # 重置裁剪偏移
+            if not is_fullscreen:
+                self._crop_offset = (0, 0)
+            photo = ImageTk.PhotoImage(pil_scaled)
+
+        # 确定目标 canvas
+        if is_fullscreen:
+            canvas = self._fullscreen_canvas
+        else:
+            canvas = self._display_canvas
+
+        canvas.delete("all")
+        canvas.create_image(ix, iy, image=photo, anchor="nw")
+
+        # 记录图片在 canvas 上的实际矩形，用于控制坐标换算（仅主 canvas）
+        if not is_fullscreen:
+            self._last_image_rect = (ix, iy, disp_w, disp_h)
 
         # 保持引用，避免被 GC
         self._frame_refs.append(photo)
-        if len(self._frame_refs) > 3:
-            self._frame_refs = self._frame_refs[-3:]
-
-        self._status_var.set(f"正在接收 {width}x{height}")
+        if len(self._frame_refs) > 5:
+            self._frame_refs = self._frame_refs[-5:]
 
     def _run_ui(self, fn):
         try:

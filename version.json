@@ -1,8 +1,8 @@
 {
-  "version": "1.4.23",
+  "version": "1.4.24",
   "release_date": "2026-07-21",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.23/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.23/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.23/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.23 — 修复进程残留和快捷方式中文乱码：关闭窗口时优先 os._exit(0) 强制退出进程；登录框关闭直接销毁主窗口避免残留；安装器添加 UTF-8 BOM 转换确保中文快捷方式正确显示；静默关闭进程不再弹窗。"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.24/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.24/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.24/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.24 — 远程桌面体验增强：新增填满模式（按比例缩放填满显示区域，可能裁剪边缘）；新增全屏模式（独立全屏窗口显示远程桌面，按 Esc 退出）；控制坐标换算在填满模式下正确映射。"
 }
