@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 File Transfer Module for ConnectHub
 纯 Python 实现：管理文件传输会话（发送/接收），使用 threading 与信号系统。

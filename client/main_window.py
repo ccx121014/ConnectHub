@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 ConnectHub 主窗口（Tkinter 实现，无 PyQt5）。
 

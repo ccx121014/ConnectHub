@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 WebSocket Client for Online Collaboration Suite
 - 关键点：

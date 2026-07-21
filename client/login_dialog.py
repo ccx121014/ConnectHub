@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Login Dialog for Online Collaboration Suite
 提供服务器地址、用户名、密码输入的认证界面。

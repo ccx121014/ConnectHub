@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 ConnectHub 自动更新模块（Tkinter 版本）。
 检查 GitHub Release 上的新版本，发现更新时弹窗提示用户。

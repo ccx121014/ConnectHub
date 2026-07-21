@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Chat Widget for Online Collaboration Suite (Tkinter version)
 Provides 1:1 and group chat functionality with message display and input.

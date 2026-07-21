@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 ConnectHub Server GUI (Tkinter)
 提供启动/停止、日志显示、在线用户列表等操作界面。

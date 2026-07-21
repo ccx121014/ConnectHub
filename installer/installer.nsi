@@ -1,3 +1,4 @@
+Unicode True
 Name "ConnectHub"
 OutFile "..\ConnectHub-Setup.exe"
 InstallDir "$PROGRAMFILES\ConnectHub"

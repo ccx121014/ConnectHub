@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Application Entry Point for Online Collaboration Suite
 基于 tkinter 的主应用程序：登录 -> 认证 -> 主窗口 -> 登出循环。

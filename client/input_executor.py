@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 远程输入执行器 —— 使用 Windows API (ctypes) 模拟鼠标 / 键盘输入。
 

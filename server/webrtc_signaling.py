@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 WebRTC Signaling Server Module
 Handles WebRTC signaling for peer-to-peer connections.

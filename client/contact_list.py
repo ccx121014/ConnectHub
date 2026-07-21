@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Contact List Widget for Online Collaboration Suite (Tkinter version)
 Displays online users with status indicators.
