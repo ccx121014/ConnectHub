@@ -197,14 +197,15 @@ class CollaborationApp:
                 pass
             self._ws_client = None
         self._dispatcher.stop_poll()
-        try:
-            self._root.destroy()
-        except Exception:
-            pass
-        # 强制结束当前进程，避免任何后台线程/定时器导致残留
+        # 先强制结束进程，避免 destroy 异常或后台线程阻塞导致无法退出
         try:
             import os
             os._exit(0)
+        except Exception:
+            pass
+        # 兜底：如果 _exit 失败，尝试正常销毁窗口
+        try:
+            self._root.destroy()
         except Exception:
             pass
 

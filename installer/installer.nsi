@@ -7,34 +7,28 @@ RequestExecutionLevel admin
 ShowInstDetails show
 ShowUnInstDetails show
 
-!define APP_VERSION "1.4.22"
+!define APP_VERSION "1.4.23"
 
 # ---------------------------------------------------------------------------
-# 自定义宏：杀死正在运行的 ConnectHub 进程
+# 自定义宏：静默杀死正在运行的 ConnectHub 进程
 # ---------------------------------------------------------------------------
 !macro KillRunningProcesses
-  nsExec::ExecToLog 'taskkill /F /IM "ConnectHub-Client.exe" /T'
-  nsExec::ExecToLog 'taskkill /F /IM "ConnectHub-Server.exe" /T'
+  nsExec::Exec 'taskkill /F /IM "ConnectHub-Client.exe" /T'
+  nsExec::Exec 'taskkill /F /IM "ConnectHub-Server.exe" /T'
   Sleep 1500
 !macroend
 
 # ---------------------------------------------------------------------------
-# 预安装检查
+# 预安装检查（静默关闭进程，不弹窗）
 # ---------------------------------------------------------------------------
 Function .onInit
-  ReadRegStr $0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\ConnectHub" "UninstallString"
-  ${If} $0 != ""
-    MessageBox MB_OK|MB_ICONINFORMATION "Detected existing ConnectHub installation. Running processes will be closed first." /SD IDOK
-  ${EndIf}
   !insertmacro KillRunningProcesses
 FunctionEnd
 
 # ---------------------------------------------------------------------------
-# 预卸载检查
+# 预卸载检查（静默关闭进程，不弹窗）
 # ---------------------------------------------------------------------------
 Function un.onInit
-  MessageBox MB_ICONQUESTION|MB_YESNO "Are you sure you want to uninstall ConnectHub?" /SD IDYES IDYES +2
-    Abort
   !insertmacro KillRunningProcesses
 FunctionEnd
 
@@ -54,13 +48,13 @@ Section "ConnectHub" SecMain
 
   Sleep 500
 
-  # 桌面快捷方式（纯英文，避免编码问题）
+  # 桌面快捷方式（中文名称）
   CreateDirectory "$SMPROGRAMS\ConnectHub"
-  CreateShortCut "$DESKTOP\ConnectHub Client.lnk" "$INSTDIR\client\ConnectHub-Client.exe"
-  CreateShortCut "$DESKTOP\ConnectHub Server.lnk" "$INSTDIR\server\ConnectHub-Server.exe"
-  CreateShortCut "$SMPROGRAMS\ConnectHub\ConnectHub Client.lnk" "$INSTDIR\client\ConnectHub-Client.exe"
-  CreateShortCut "$SMPROGRAMS\ConnectHub\ConnectHub Server.lnk" "$INSTDIR\server\ConnectHub-Server.exe"
-  CreateShortCut "$SMPROGRAMS\ConnectHub\Uninstall.lnk" "$INSTDIR\Uninstall.exe"
+  CreateShortCut "$DESKTOP\ConnectHub 客户端.lnk" "$INSTDIR\client\ConnectHub-Client.exe"
+  CreateShortCut "$DESKTOP\ConnectHub 服务端.lnk" "$INSTDIR\server\ConnectHub-Server.exe"
+  CreateShortCut "$SMPROGRAMS\ConnectHub\客户端.lnk" "$INSTDIR\client\ConnectHub-Client.exe"
+  CreateShortCut "$SMPROGRAMS\ConnectHub\服务端.lnk" "$INSTDIR\server\ConnectHub-Server.exe"
+  CreateShortCut "$SMPROGRAMS\ConnectHub\卸载.lnk" "$INSTDIR\Uninstall.exe"
 
   # 写入注册表
   WriteRegStr HKLM "Software\ConnectHub" "" $INSTDIR
@@ -81,8 +75,8 @@ SectionEnd
 Section "Uninstall"
   !insertmacro KillRunningProcesses
 
-  Delete "$DESKTOP\ConnectHub Client.lnk"
-  Delete "$DESKTOP\ConnectHub Server.lnk"
+  Delete "$DESKTOP\ConnectHub 客户端.lnk"
+  Delete "$DESKTOP\ConnectHub 服务端.lnk"
   RMDir /r "$SMPROGRAMS\ConnectHub"
 
   RMDir /r "$INSTDIR\client"

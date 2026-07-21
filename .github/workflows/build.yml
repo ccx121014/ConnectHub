@@ -432,6 +432,12 @@ jobs:
             exit 1
           }
 
+          # 将 NSIS 脚本转换为 UTF-8 BOM，确保 Unicode 中文正确编译
+          Write-Host "Converting installer.nsi to UTF-8 BOM..."
+          $content = Get-Content -Raw "installer\installer.nsi"
+          $utf8Bom = New-Object System.Text.UTF8Encoding($True)
+          [System.IO.File]::WriteAllText("installer\installer.nsi", $content, $utf8Bom)
+
           Write-Host "CWD: $(Get-Location)"
           Write-Host "dist folder listing:"
           Get-ChildItem dist -Recurse | Select-Object FullName, Length | Format-Table -AutoSize

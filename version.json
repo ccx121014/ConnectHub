@@ -1,8 +1,8 @@
 {
-  "version": "1.4.22",
+  "version": "1.4.23",
   "release_date": "2026-07-21",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.22/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.22/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.22/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.22 — 修复进程残留和快捷方式乱码：关闭窗口后强制退出进程避免后台残留；安装器快捷方式改用纯英文避免中文编码问题；安装前自动关闭运行中的进程。"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.23/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.23/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.23/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.23 — 修复进程残留和快捷方式中文乱码：关闭窗口时优先 os._exit(0) 强制退出进程；登录框关闭直接销毁主窗口避免残留；安装器添加 UTF-8 BOM 转换确保中文快捷方式正确显示；静默关闭进程不再弹窗。"
 }

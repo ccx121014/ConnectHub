@@ -298,12 +298,26 @@ class LoginDialog:
 
     def _on_cancel(self):
         # 取消时关闭；通知应用层用户已取消/关闭窗口
-        self.status_label.configure(text="已取消", fg="#666666")
+        try:
+            self.status_label.configure(text="已取消", fg="#666666")
+        except Exception:
+            pass
         try:
             self.cancelled.emit()
         except Exception:
             pass
+        # 直接销毁主窗口并强制退出进程，确保不留后台
+        if self.master is not None:
+            try:
+                self.master.destroy()
+            except Exception:
+                pass
         self.close()
+        try:
+            import os
+            os._exit(0)
+        except Exception:
+            pass
 
     def _set_connecting(self, connecting: bool):
         self._connecting = connecting
