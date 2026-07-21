@@ -418,7 +418,16 @@ class ServerGUI:
 
     def _on_close(self):
         self._on_stop()
-        self._root.destroy()
+        try:
+            self._root.destroy()
+        except Exception:
+            pass
+        # 强制结束当前进程，避免任何后台线程/定时器导致残留
+        try:
+            import os
+            os._exit(0)
+        except Exception:
+            pass
 
     def run(self):
         self._root.mainloop()

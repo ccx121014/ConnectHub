@@ -1,8 +1,8 @@
 {
-  "version": "1.4.20",
+  "version": "1.4.22",
   "release_date": "2026-07-21",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.20/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.20/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.20/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.20 — 网络请求稳定性增强：更新模块添加 urllib fallback 机制，WinHTTP 失败时自动回退；所有协议文件添加 UTF-8 编码声明；服务端 ssl_stub 导入添加多层 fallback。"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.22/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.22/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.22/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.22 — 修复进程残留和快捷方式乱码：关闭窗口后强制退出进程避免后台残留；安装器快捷方式改用纯英文避免中文编码问题；安装前自动关闭运行中的进程。"
 }

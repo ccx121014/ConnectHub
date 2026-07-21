@@ -201,6 +201,12 @@ class CollaborationApp:
             self._root.destroy()
         except Exception:
             pass
+        # 强制结束当前进程，避免任何后台线程/定时器导致残留
+        try:
+            import os
+            os._exit(0)
+        except Exception:
+            pass
 
     # --- 登录流程 -------------------------------------------------------
     def _show_login_dialog(self):
@@ -215,7 +221,13 @@ class CollaborationApp:
         self._login_dialog = LoginDialog(self._root)
         self._login_dialog.connect_request.connect(self._on_connect_request)
         self._login_dialog.register_request.connect(self._on_register_request)
+        self._login_dialog.cancelled.connect(self._on_login_cancelled)
         self._login_dialog.show()
+
+    def _on_login_cancelled(self):
+        """用户取消/关闭登录对话框 —— 直接退出整个应用，避免后台残留。"""
+        logger.info("Login dialog cancelled, quitting application.")
+        self.quit()
 
     def _on_connect_request(self, server: str, port: int, username: str, password: str):
         logger.info("Connect request: server=%s, port=%s, username=%s", server, port, username)

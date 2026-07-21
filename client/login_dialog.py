@@ -33,6 +33,7 @@ class LoginDialog:
         # 信号：与旧的 pyqtSignal 签名一致
         self.connect_request = Signal(str, int, str, str)
         self.register_request = Signal(str, int, str, str)
+        self.cancelled = Signal()  # 用户点击取消/关闭窗口时触发
 
         # master 可以是主 Tk 或其他 Toplevel；如果没有则自己创建一个隐藏 Tk
         if master is None:
@@ -296,8 +297,12 @@ class LoginDialog:
         self.register_request.emit(server, port, username, password)
 
     def _on_cancel(self):
-        # 取消时关闭；应用层的 finished/cancelled 处理由 CollaborationApp 决定
+        # 取消时关闭；通知应用层用户已取消/关闭窗口
         self.status_label.configure(text="已取消", fg="#666666")
+        try:
+            self.cancelled.emit()
+        except Exception:
+            pass
         self.close()
 
     def _set_connecting(self, connecting: bool):
