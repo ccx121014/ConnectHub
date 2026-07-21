@@ -57,7 +57,7 @@ echo 客户端构建完成
 echo.
 
 echo [3/3] 正在构建服务器...
-pyinstaller --noconfirm --clean server/gui.py --name ConnectHub-Server --console --strip ^
+pyinstaller --noconfirm --clean server/gui.py --name ConnectHub-Server --windowed --strip ^
     --paths . --paths server --paths client ^
     --add-data "protocol;protocol" ^
     --add-data "version.json;." ^

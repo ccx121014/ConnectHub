@@ -247,7 +247,7 @@ jobs:
         shell: pwsh
         run: |
           python -OO -m PyInstaller --noconfirm --clean `
-            --onedir --console --strip `
+            --onedir --windowed --strip `
             --paths . --paths server --paths client `
             --add-data "protocol;protocol" `
             --add-data "version.json;." `
