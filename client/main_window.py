@@ -505,6 +505,16 @@ class DesktopFrame(ttk.Frame):
         c.bind("<KeyRelease>", self._on_canvas_key_up)
         # 让 canvas 可聚焦以接收键盘
         c.configure(takefocus=True)
+        # 点击 canvas 时自动获取焦点
+        c.bind("<Button-1>", self._on_canvas_focus, add="+")
+        c.bind("<Button-3>", self._on_canvas_focus, add="+")
+
+    def _on_canvas_focus(self, event):
+        """点击 canvas 时获取焦点，确保键盘事件能被捕获。"""
+        try:
+            event.widget.focus_set()
+        except Exception:
+            pass
 
     def _show_message(self, text: str):
         self._display_canvas.delete("all")
@@ -547,21 +557,42 @@ class DesktopFrame(ttk.Frame):
         else:
             on_reject()
 
-    def display_frame(self, image_data_b64: str, width: int, height: int):
+    def display_frame(self, image_data_b64: str, width: int, height: int,
+                      orig_width: int = 0, orig_height: int = 0):
         """解码一帧画面并显示（从 WebSocket 接收帧时调用）。"""
-        self._run_ui(lambda: self._do_display_frame(image_data_b64, width, height))
+        ow = orig_width if orig_width > 0 else width
+        oh = orig_height if orig_height > 0 else height
+        self._run_ui(lambda: self._do_display_frame(image_data_b64, width, height, ow, oh))
 
     def set_status(self, status: str):
         self._run_ui(lambda: self._status_var.set(status))
 
     def set_viewing_target(self, target: Optional[str]):
         """设置当前正在查看谁的屏幕（作为查看方 / 控制方）。"""
+        old_target = self._viewing_target
         self._viewing_target = target
         if target:
             try:
                 self._display_canvas.focus_set()
             except Exception:
                 pass
+            # 在顶层窗口也绑定键盘事件，确保键盘控制可靠
+            if not old_target:
+                try:
+                    root = self.winfo_toplevel()
+                    root.bind("<KeyPress>", self._on_global_key_down)
+                    root.bind("<KeyRelease>", self._on_global_key_up)
+                except Exception:
+                    pass
+        else:
+            # 停止查看时解绑全局键盘事件
+            if old_target:
+                try:
+                    root = self.winfo_toplevel()
+                    root.unbind("<KeyPress>")
+                    root.unbind("<KeyRelease>")
+                except Exception:
+                    pass
 
     def allow_remote_control(self) -> bool:
         """是否允许对方远程控制本机。"""
@@ -572,10 +603,19 @@ class DesktopFrame(ttk.Frame):
 
     def stop_all(self):
         self._stop_capture_loop()
+        old_target = self._viewing_target
         self._viewing_target = None
         self._last_image_rect = None
         # 关闭全屏窗口
         self._close_fullscreen()
+        # 解绑全局键盘事件
+        if old_target:
+            try:
+                root = self.winfo_toplevel()
+                root.unbind("<KeyPress>")
+                root.unbind("<KeyRelease>")
+            except Exception:
+                pass
         self._run_ui(lambda: self._status_var.set("已停止"))
 
     # ---------------------- 控制事件 → 发送给对端 ----------------------
@@ -639,6 +679,43 @@ class DesktopFrame(ttk.Frame):
 
     def _on_canvas_key_up(self, event):
         self._send_key(event, is_down=False)
+
+    def _on_global_key_down(self, event):
+        """全局键盘按下事件（顶层窗口绑定），仅在远程桌面查看时生效。"""
+        if not self._viewing_target or self._ws is None:
+            return
+        # 检查当前是否在远程桌面标签页
+        try:
+            root = self.winfo_toplevel()
+            nb = getattr(root, "_main_window_ref", None)
+            if nb is None:
+                nb = self._find_notebook()
+            if nb is not None:
+                current = nb.index(nb.select())
+                desktop_idx = nb.index(self.winfo_parent())
+                if current != desktop_idx:
+                    return
+        except Exception:
+            pass
+        self._send_key(event, is_down=True)
+
+    def _on_global_key_up(self, event):
+        """全局键盘释放事件（顶层窗口绑定），仅在远程桌面查看时生效。"""
+        if not self._viewing_target or self._ws is None:
+            return
+        self._send_key(event, is_down=False)
+
+    def _find_notebook(self):
+        """向上查找 ttk.Notebook 父容器。"""
+        parent = self.master
+        while parent is not None:
+            try:
+                if isinstance(parent, ttk.Notebook):
+                    return parent
+            except Exception:
+                pass
+            parent = getattr(parent, "master", None)
+        return None
 
     def _send_key(self, event, is_down: bool):
         if not self._viewing_target or self._ws is None:
@@ -833,8 +910,11 @@ class DesktopFrame(ttk.Frame):
             buf = io.BytesIO()
             screen.convert("RGB").save(buf, format="JPEG", quality=82)
             b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-            self._ws.send_desktop_frame(self._sharer_target, b64,
-                                        screen.size[0], screen.size[1])
+            self._ws.send_desktop_frame(
+                self._sharer_target, b64,
+                screen.size[0], screen.size[1],
+                orig_w, orig_h,
+            )
         except Exception as exc:
             logger.debug(f"截图/发送异常: {exc}")
 
@@ -847,7 +927,8 @@ class DesktopFrame(ttk.Frame):
                 pass
             self._capture_timer = None
 
-    def _do_display_frame(self, image_data_b64: str, width: int, height: int):
+    def _do_display_frame(self, image_data_b64: str, width: int, height: int,
+                          orig_width: int = 0, orig_height: int = 0):
         try:
             img_bytes = base64.b64decode(image_data_b64)
         except Exception as exc:
@@ -855,7 +936,10 @@ class DesktopFrame(ttk.Frame):
             return
 
         # 记录对端屏幕原始尺寸（用于控制坐标换算）
-        if width and height:
+        # 优先使用 orig_width/orig_height（原始屏幕分辨率），兼容旧版本
+        if orig_width and orig_height:
+            self._last_screen_size = (int(orig_width), int(orig_height))
+        elif width and height:
             self._last_screen_size = (int(width), int(height))
 
         # 尝试用 Pillow 解码 JPEG；否则退化为二进制显示
@@ -1838,8 +1922,11 @@ class MainWindow(ttk.Frame):
         image_data = payload.get("image_data", "")
         width = int(payload.get("width", 0) or 0)
         height = int(payload.get("height", 0) or 0)
+        orig_width = int(payload.get("orig_width", 0) or 0)
+        orig_height = int(payload.get("orig_height", 0) or 0)
         if image_data and self._desktop_frame is not None:
-            self._desktop_frame.display_frame(image_data, width, height)
+            self._desktop_frame.display_frame(image_data, width, height,
+                                               orig_width, orig_height)
 
     def _handle_desktop_stop(self, msg: Message):
         sender = getattr(msg, "sender", "")

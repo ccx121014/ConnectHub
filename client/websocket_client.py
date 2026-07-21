@@ -410,12 +410,19 @@ class WebSocketClient:
         )
         self.send(msg)
 
-    def send_desktop_frame(self, target: str, image_data: str, width: int, height: int):
+    def send_desktop_frame(self, target: str, image_data: str, width: int, height: int,
+                           orig_width: int = 0, orig_height: int = 0):
         msg = Message(
             type=MessageType.DESKTOP_FRAME,
             sender=self._username or "",
             target=target,
-            payload={"image_data": image_data, "width": width, "height": height},
+            payload={
+                "image_data": image_data,
+                "width": width,
+                "height": height,
+                "orig_width": orig_width or width,
+                "orig_height": orig_height or height,
+            },
             timestamp=time.time(),
             message_id=str(uuid.uuid4()),
         )

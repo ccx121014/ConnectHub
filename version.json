@@ -1,8 +1,8 @@
 {
-  "version": "1.4.24",
+  "version": "1.4.25",
   "release_date": "2026-07-21",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.24/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.24/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.24/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.24 — 远程桌面体验增强：新增填满模式（按比例缩放填满显示区域，可能裁剪边缘）；新增全屏模式（独立全屏窗口显示远程桌面，按 Esc 退出）；控制坐标换算在填满模式下正确映射。"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.25/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.25/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.25/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.25 — 修复远程桌面控制问题：鼠标坐标使用原始屏幕分辨率换算，位置准确对应；键盘事件同时绑定到顶层窗口和Canvas，点击画面自动获焦确保键盘控制可靠。"
 }
