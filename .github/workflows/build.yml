@@ -518,6 +518,7 @@ jobs:
         shell: pwsh
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        continue-on-error: true
         run: |
           if (-not $env:GITEE_TOKEN) {
             Write-Host "GITEE_TOKEN not set, skipping Gitee sync."
@@ -527,21 +528,30 @@ jobs:
           }
 
           $repo = "ccx121014/ConnectHub"
-          git remote add gitee "https://x-access-token:$env:GITEE_TOKEN@gitee.com/$repo.git" 2>$null
+          # Gitee 使用 oauth2 作为 token 认证的用户名（不是 x-access-token）
+          $giteeUrl = "https://oauth2:$env:GITEE_TOKEN@gitee.com/$repo.git"
+
+          git remote remove gitee 2>$null | Out-Null
+          git remote add gitee $giteeUrl 2>$null
           if ($LASTEXITCODE -ne 0) {
-            git remote set-url gitee "https://x-access-token:$env:GITEE_TOKEN@gitee.com/$repo.git"
+            git remote set-url gitee $giteeUrl
           }
 
-          Write-Host "Pushing branches to Gitee..."
-          git push gitee main --force
+          Write-Host "Current HEAD:"
+          git rev-parse --short HEAD
+          git log --oneline -1
+
+          Write-Host "Pushing HEAD to Gitee main..."
+          # 推送 HEAD:main 而非 main，避免 detached HEAD 时失败
+          git push gitee HEAD:main --force
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "Branch push failed"
+            Write-Host "Branch push failed (non-fatal)"
           }
 
           Write-Host "Pushing tags to Gitee..."
           git push gitee --tags --force
           if ($LASTEXITCODE -ne 0) {
-            Write-Host "Tag push failed"
+            Write-Host "Tag push failed (non-fatal)"
           }
 
           Write-Host "Gitee sync complete."
