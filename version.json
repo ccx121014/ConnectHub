@@ -1,8 +1,8 @@
 {
-  "version": "1.4.18",
-  "release_date": "2026-07-20",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.18/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.18/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.18/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.18 — 稳定性修复：修复 MainWindow 关闭时信号未断开导致的内存泄漏；修复客户端/服务端导入路径问题，兼容 PyInstaller 打包环境；增强 Message.from_json 异常处理（分类捕获 JSON 解析、类型转换、字段缺失错误）；添加 file_transfer chunk_index 和消息 target 空值检查；修复服务端 sys.path 设置顺序导致秒关问题；完善 chat_history 和 webrtc_signaling 异常捕获。"
+  "version": "1.4.19",
+  "release_date": "2026-07-21",
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.19/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.19/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.19/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.19 — 构建系统修复：修复 NSIS 输出路径错误导致安装包无法生成的问题；修复 Gitee 同步认证（使用 oauth2 用户名）；改进构建日志捕获和失败快退机制。"
 }
