@@ -37,28 +37,46 @@ _DEFAULT_VERSION = "0.0.0"
 _API_TIMEOUT = 10
 
 
+def _build_user_agent() -> str:
+    """构造唯一化的 User-Agent，避免 GitHub API 限流（相同 UA 会被快速限流）。"""
+    import platform
+    import time as _time
+    # 使用启动时间戳 + 平台信息生成唯一 ID
+    try:
+        # 进程启动时间作为唯一标识的一部分
+        boot = str(int(_time.time() * 1000) % 100000000)
+    except Exception:
+        boot = "0"
+    plat = platform.system() or "Win"
+    return f"ConnectHub-Updater/{_DEFAULT_VERSION} ({plat}; uid={boot})"
+
+
 # ---------------------------------------------------------------------------
 # WinHTTP HTTPS GET (绕过 Python ssl/OpenSSL，使用 Windows 原生 TLS)
 # ---------------------------------------------------------------------------
-def _urllib_get(url: str, timeout_ms: int = 10000) -> bytes:
+def _urllib_get(url: str, timeout_ms: int = 10000, extra_headers: Optional[Dict[str, str]] = None) -> bytes:
     """使用 urllib 获取 URL 内容（作为 WinHTTP 的备用方案）。"""
     import urllib.request
     timeout = timeout_ms / 1000.0
-    req = urllib.request.Request(url, headers={
+    headers = {
         "Accept": "application/vnd.github+json",
-        "User-Agent": f"ConnectHub-Updater/{_DEFAULT_VERSION}",
-    })
+        "User-Agent": _build_user_agent(),
+    }
+    if extra_headers:
+        headers.update(extra_headers)
+    req = urllib.request.Request(url, headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read()
 
 
-def _winhttp_get(url: str, timeout_ms: int = 10000) -> bytes:
+def _winhttp_get(url: str, timeout_ms: int = 10000, extra_headers: Optional[Dict[str, str]] = None) -> bytes:
     """使用 Windows WinHTTP API 发送 HTTPS GET 请求。失败时自动回退到 urllib。"""
     try:
         winhttp = ctypes.windll.winhttp
 
+        user_agent = _build_user_agent()
         hSession = winhttp.WinHttpOpen(
-            f"ConnectHub-Updater/{_DEFAULT_VERSION}",
+            user_agent,
             1,  # WINHTTP_ACCESS_TYPE_DEFAULT_PROXY
             None,
             None,
@@ -97,10 +115,13 @@ def _winhttp_get(url: str, timeout_ms: int = 10000) -> bytes:
                         winhttp.WinHttpSetOption(hRequest, 5, ctypes.byref(dw), sz)   # SEND
                         winhttp.WinHttpSetOption(hRequest, 6, ctypes.byref(dw), sz)   # RECEIVE
 
-                    # 添加 Accept header
-                    headers = "Accept: application/vnd.github+json\r\n"
+                    # 添加 Accept header + 自定义 headers
+                    header_lines = "Accept: application/vnd.github+json\r\n"
+                    if extra_headers:
+                        for k, v in extra_headers.items():
+                            header_lines += f"{k}: {v}\r\n"
                     if not winhttp.WinHttpSendRequest(
-                        hRequest, headers, len(headers), None, 0, 0, 0
+                        hRequest, header_lines, len(header_lines), None, 0, 0, 0
                     ):
                         raise OSError("WinHttpSendRequest failed")
 
@@ -147,7 +168,7 @@ def _winhttp_get(url: str, timeout_ms: int = 10000) -> bytes:
             winhttp.WinHttpCloseHandle(hSession)
     except Exception as exc:
         logger.info(f"WinHTTP failed, falling back to urllib: {exc}")
-        return _urllib_get(url, timeout_ms)
+        return _urllib_get(url, timeout_ms, extra_headers)
 
 
 def _urllib_download(
@@ -161,7 +182,7 @@ def _urllib_download(
     timeout = timeout_ms / 1000.0
     req = urllib.request.Request(url, headers={
         "Accept": "application/octet-stream",
-        "User-Agent": f"ConnectHub-Updater/{_DEFAULT_VERSION}",
+        "User-Agent": _build_user_agent(),
     })
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         total_size = int(resp.headers.get("Content-Length", 0))
@@ -362,19 +383,39 @@ class Updater:
         )
 
     def _fetch_latest_release(self) -> Optional[Dict[str, Any]]:
+        """从 GitHub API 获取最新 release 信息。优先 /releases/latest，
+        失败时回退到 /releases 列表取第一个。"""
         url = self._build_latest_api_url()
         try:
             raw = _winhttp_get(url, timeout_ms=_API_TIMEOUT * 1000)
             data = json.loads(raw.decode("utf-8"))
         except OSError as exc:
             err = str(exc).lower()
-            if "403" in err or "429" in err:
-                self.update_error.emit("GitHub API 访问频率超限，请稍后再试")
-            elif "http" in err:
-                self.update_error.emit(f"HTTP 错误: {exc}")
-            else:
-                self.update_error.emit(f"网络错误: {exc}")
-            return None
+            logger.warning(f"更新检查 /releases/latest 失败: {exc}，尝试 /releases 列表")
+            # 回退：使用 /releases 列表取第一个
+            try:
+                list_url = f"https://api.github.com/repos/{self.repo_owner}/{self.repo_name}/releases?per_page=1"
+                raw2 = _winhttp_get(list_url, timeout_ms=_API_TIMEOUT * 1000)
+                arr = json.loads(raw2.decode("utf-8"))
+                if isinstance(arr, list) and arr:
+                    data = arr[0]
+                else:
+                    if "403" in err or "429" in err:
+                        self.update_error.emit("GitHub API 访问频率超限，请稍后再试")
+                    elif "http" in err:
+                        self.update_error.emit(f"HTTP 错误: {exc}")
+                    else:
+                        self.update_error.emit(f"网络错误: {exc}")
+                    return None
+            except Exception as exc2:
+                logger.error(f"更新检查 /releases 列表也失败: {exc2}")
+                if "403" in err or "429" in err:
+                    self.update_error.emit("GitHub API 访问频率超限，请稍后再试")
+                elif "http" in err:
+                    self.update_error.emit(f"HTTP 错误: {exc}")
+                else:
+                    self.update_error.emit(f"网络错误: {exc}")
+                return None
         except (json.JSONDecodeError, ValueError) as exc:
             self.update_error.emit(f"无法解析更新信息: {exc}")
             return None
@@ -409,8 +450,10 @@ class Updater:
 
     def _run_check(self, show_dialog: bool):
         """在后台线程中执行的实际检查逻辑。"""
+        logger.info(f"开始检查更新：当前版本 {self.current_version}")
         data = self._fetch_latest_release()
         if not data:
+            logger.warning("获取最新 release 信息失败")
             return
 
         tag_name = (data.get("tag_name") or "").strip()
@@ -418,6 +461,7 @@ class Updater:
             self.update_error.emit("未找到版本号标签")
             return
 
+        logger.info(f"获取到最新版本: {tag_name}")
         html_url = data.get("html_url", "") or ""
 
         # 优先使用 assets 中的安装包链接，否则用 release page

@@ -1,8 +1,8 @@
 {
-  "version": "1.4.25",
+  "version": "1.4.26",
   "release_date": "2026-07-21",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.25/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.25/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.25/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.25 — 修复远程桌面控制问题：鼠标坐标使用原始屏幕分辨率换算，位置准确对应；键盘事件同时绑定到顶层窗口和Canvas，点击画面自动获焦确保键盘控制可靠。"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.26/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.26/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.26/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.26 — 修复更新检查问题：User-Agent 唯一化避免 GitHub API 限流；/releases/latest 失败时回退到 /releases 列表；增加详细日志输出便于诊断。"
 }
