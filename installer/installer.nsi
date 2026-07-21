@@ -1,5 +1,5 @@
 Name "ConnectHub"
-OutFile "ConnectHub-Setup.exe"
+OutFile "..\ConnectHub-Setup.exe"
 InstallDir "$PROGRAMFILES\ConnectHub"
 InstallDirRegKey HKLM "Software\ConnectHub" ""
 RequestExecutionLevel admin
