@@ -1,8 +1,8 @@
 {
-  "version": "1.4.19",
+  "version": "1.4.20",
   "release_date": "2026-07-21",
-  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.19/ConnectHub-Setup.exe",
-  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.19/ConnectHub-Client.zip",
-  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.19/ConnectHub-Server.zip",
-  "release_notes": "ConnectHub v1.4.19 — 构建系统修复：修复 NSIS 输出路径错误导致安装包无法生成的问题；修复 Gitee 同步认证（使用 oauth2 用户名）；改进构建日志捕获和失败快退机制。"
+  "installer_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.20/ConnectHub-Setup.exe",
+  "client_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.20/ConnectHub-Client.zip",
+  "server_download": "https://github.com/ccx121014/ConnectHub/releases/download/v1.4.20/ConnectHub-Server.zip",
+  "release_notes": "ConnectHub v1.4.20 — 网络请求稳定性增强：更新模块添加 urllib fallback 机制，WinHTTP 失败时自动回退；所有协议文件添加 UTF-8 编码声明；服务端 ssl_stub 导入添加多层 fallback。"
 }
