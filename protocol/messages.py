@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Communication Protocol Definitions
 Defines all message types and JSON structures for the collaboration suite.

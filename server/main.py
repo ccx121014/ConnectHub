@@ -13,8 +13,13 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 # --- 注入 ssl stub（PyInstaller 排除 OpenSSL 后的最小兼容层）---
 if "ssl" not in sys.modules:
-    from client import ssl_stub
-
+    try:
+        from client import ssl_stub
+    except ImportError:
+        try:
+            from . import ssl_stub
+        except ImportError:
+            from server import ssl_stub
     sys.modules["ssl"] = ssl_stub
 
 import asyncio

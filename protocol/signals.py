@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Pure-Python signal/event system — zero external dependencies.
 

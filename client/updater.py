@@ -40,179 +40,89 @@ _API_TIMEOUT = 10
 # ---------------------------------------------------------------------------
 # WinHTTP HTTPS GET (绕过 Python ssl/OpenSSL，使用 Windows 原生 TLS)
 # ---------------------------------------------------------------------------
+def _urllib_get(url: str, timeout_ms: int = 10000) -> bytes:
+    """使用 urllib 获取 URL 内容（作为 WinHTTP 的备用方案）。"""
+    import urllib.request
+    timeout = timeout_ms / 1000.0
+    req = urllib.request.Request(url, headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": f"ConnectHub-Updater/{_DEFAULT_VERSION}",
+    })
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return resp.read()
+
+
 def _winhttp_get(url: str, timeout_ms: int = 10000) -> bytes:
-    """使用 Windows WinHTTP API 发送 HTTPS GET 请求。"""
-    winhttp = ctypes.windll.winhttp
-
-    hSession = winhttp.WinHttpOpen(
-        f"ConnectHub-Updater/{_DEFAULT_VERSION}",
-        1,  # WINHTTP_ACCESS_TYPE_DEFAULT_PROXY
-        None,
-        None,
-        0,
-    )
-    if not hSession:
-        raise OSError("WinHttpOpen failed")
-
+    """使用 Windows WinHTTP API 发送 HTTPS GET 请求。失败时自动回退到 urllib。"""
     try:
-        parsed = urlparse(url)
-        host = parsed.hostname or ""
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        winhttp = ctypes.windll.winhttp
 
-        hConnect = winhttp.WinHttpConnect(hSession, host, port, 0)
-        if not hConnect:
-            raise OSError("WinHttpConnect failed")
+        hSession = winhttp.WinHttpOpen(
+            f"ConnectHub-Updater/{_DEFAULT_VERSION}",
+            1,  # WINHTTP_ACCESS_TYPE_DEFAULT_PROXY
+            None,
+            None,
+            0,
+        )
+        if not hSession:
+            raise OSError("WinHttpOpen failed")
 
         try:
-            path = parsed.path or "/"
-            if parsed.query:
-                path += "?" + parsed.query
+            parsed = urlparse(url)
+            host = parsed.hostname or ""
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
 
-            flags = 0x00800000 if parsed.scheme == "https" else 0  # WINHTTP_FLAG_SECURE
-            hRequest = winhttp.WinHttpOpenRequest(
-                hConnect, "GET", path, None, None, None, flags
-            )
-            if not hRequest:
-                raise OSError("WinHttpOpenRequest failed")
+            hConnect = winhttp.WinHttpConnect(hSession, host, port, 0)
+            if not hConnect:
+                raise OSError("WinHttpConnect failed")
 
             try:
-                # 设置超时
-                if timeout_ms > 0:
-                    dw = wintypes.DWORD(timeout_ms)
-                    sz = ctypes.sizeof(dw)
-                    winhttp.WinHttpSetOption(hRequest, 11, ctypes.byref(dw), sz)  # CONNECT
-                    winhttp.WinHttpSetOption(hRequest, 5, ctypes.byref(dw), sz)   # SEND
-                    winhttp.WinHttpSetOption(hRequest, 6, ctypes.byref(dw), sz)   # RECEIVE
+                path = parsed.path or "/"
+                if parsed.query:
+                    path += "?" + parsed.query
 
-                # 添加 Accept header
-                headers = "Accept: application/vnd.github+json\r\n"
-                if not winhttp.WinHttpSendRequest(
-                    hRequest, headers, len(headers), None, 0, 0, 0
-                ):
-                    raise OSError("WinHttpSendRequest failed")
-
-                if not winhttp.WinHttpReceiveResponse(hRequest, None):
-                    raise OSError("WinHttpReceiveResponse failed")
-
-                # 读取状态码
-                status_code = wintypes.DWORD()
-                status_size = wintypes.DWORD(ctypes.sizeof(status_code))
-                winhttp.WinHttpQueryHeaders(
-                    hRequest,
-                    19,  # WINHTTP_QUERY_STATUS_CODE
-                    None,
-                    ctypes.byref(status_code),
-                    ctypes.byref(status_size),
-                    None,
+                flags = 0x00800000 if parsed.scheme == "https" else 0  # WINHTTP_FLAG_SECURE
+                hRequest = winhttp.WinHttpOpenRequest(
+                    hConnect, "GET", path, None, None, None, flags
                 )
-                code = int(status_code.value)
-                if code != 200:
-                    raise OSError(f"HTTP {code}")
+                if not hRequest:
+                    raise OSError("WinHttpOpenRequest failed")
 
-                chunks = []
-                while True:
-                    avail = wintypes.DWORD()
-                    if not winhttp.WinHttpQueryDataAvailable(
-                        hRequest, ctypes.byref(avail)
+                try:
+                    # 设置超时
+                    if timeout_ms > 0:
+                        dw = wintypes.DWORD(timeout_ms)
+                        sz = ctypes.sizeof(dw)
+                        winhttp.WinHttpSetOption(hRequest, 11, ctypes.byref(dw), sz)  # CONNECT
+                        winhttp.WinHttpSetOption(hRequest, 5, ctypes.byref(dw), sz)   # SEND
+                        winhttp.WinHttpSetOption(hRequest, 6, ctypes.byref(dw), sz)   # RECEIVE
+
+                    # 添加 Accept header
+                    headers = "Accept: application/vnd.github+json\r\n"
+                    if not winhttp.WinHttpSendRequest(
+                        hRequest, headers, len(headers), None, 0, 0, 0
                     ):
-                        raise OSError("WinHttpQueryDataAvailable failed")
-                    if avail.value == 0:
-                        break
-                    buf = ctypes.create_string_buffer(avail.value)
-                    read = wintypes.DWORD()
-                    if not winhttp.WinHttpReadData(
-                        hRequest, buf, avail.value, ctypes.byref(read)
-                    ):
-                        raise OSError("WinHttpReadData failed")
-                    chunks.append(buf.raw[: read.value])
-                return b"".join(chunks)
-            finally:
-                winhttp.WinHttpCloseHandle(hRequest)
-        finally:
-            winhttp.WinHttpCloseHandle(hConnect)
-    finally:
-        winhttp.WinHttpCloseHandle(hSession)
+                        raise OSError("WinHttpSendRequest failed")
 
+                    if not winhttp.WinHttpReceiveResponse(hRequest, None):
+                        raise OSError("WinHttpReceiveResponse failed")
 
-def _winhttp_download(
-    url: str,
-    save_path: str,
-    timeout_ms: int = 60000,
-    progress_cb: Optional[Callable[[int, int], None]] = None,
-) -> int:
-    """使用 WinHTTP 下载文件到本地路径，返回下载字节数。"""
-    winhttp = ctypes.windll.winhttp
+                    # 读取状态码
+                    status_code = wintypes.DWORD()
+                    status_size = wintypes.DWORD(ctypes.sizeof(status_code))
+                    winhttp.WinHttpQueryHeaders(
+                        hRequest,
+                        19,  # WINHTTP_QUERY_STATUS_CODE
+                        None,
+                        ctypes.byref(status_code),
+                        ctypes.byref(status_size),
+                        None,
+                    )
+                    code = int(status_code.value)
+                    if code != 200:
+                        raise OSError(f"HTTP {code}")
 
-    hSession = winhttp.WinHttpOpen(
-        f"ConnectHub-Updater/{_DEFAULT_VERSION}",
-        1,  # WINHTTP_ACCESS_TYPE_DEFAULT_PROXY
-        None,
-        None,
-        0,
-    )
-    if not hSession:
-        raise OSError("WinHttpOpen failed")
-
-    try:
-        parsed = urlparse(url)
-        host = parsed.hostname or ""
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
-
-        hConnect = winhttp.WinHttpConnect(hSession, host, port, 0)
-        if not hConnect:
-            raise OSError("WinHttpConnect failed")
-
-        try:
-            path = parsed.path or "/"
-            if parsed.query:
-                path += "?" + parsed.query
-
-            flags = 0x00800000 if parsed.scheme == "https" else 0
-            hRequest = winhttp.WinHttpOpenRequest(
-                hConnect, "GET", path, None, None, None, flags
-            )
-            if not hRequest:
-                raise OSError("WinHttpOpenRequest failed")
-
-            try:
-                if timeout_ms > 0:
-                    dw = wintypes.DWORD(timeout_ms)
-                    sz = ctypes.sizeof(dw)
-                    winhttp.WinHttpSetOption(hRequest, 11, ctypes.byref(dw), sz)
-                    winhttp.WinHttpSetOption(hRequest, 5, ctypes.byref(dw), sz)
-                    winhttp.WinHttpSetOption(hRequest, 6, ctypes.byref(dw), sz)
-
-                if not winhttp.WinHttpSendRequest(
-                    hRequest, None, 0, None, 0, 0, 0
-                ):
-                    raise OSError("WinHttpSendRequest failed")
-
-                if not winhttp.WinHttpReceiveResponse(hRequest, None):
-                    raise OSError("WinHttpReceiveResponse failed")
-
-                status_code = wintypes.DWORD()
-                status_size = wintypes.DWORD(ctypes.sizeof(status_code))
-                winhttp.WinHttpQueryHeaders(
-                    hRequest, 19, None,
-                    ctypes.byref(status_code),
-                    ctypes.byref(status_size), None,
-                )
-                code = int(status_code.value)
-                if code != 200:
-                    raise OSError(f"HTTP {code}")
-
-                total_size = 0
-                content_length = wintypes.DWORD()
-                cl_size = wintypes.DWORD(ctypes.sizeof(content_length))
-                if winhttp.WinHttpQueryHeaders(
-                    hRequest, 5, None,  # WINHTTP_QUERY_CONTENT_LENGTH
-                    ctypes.byref(content_length),
-                    ctypes.byref(cl_size), None,
-                ):
-                    total_size = int(content_length.value)
-
-                downloaded = 0
-                with open(save_path, "wb") as f:
+                    chunks = []
                     while True:
                         avail = wintypes.DWORD()
                         if not winhttp.WinHttpQueryDataAvailable(
@@ -227,22 +137,164 @@ def _winhttp_download(
                             hRequest, buf, avail.value, ctypes.byref(read)
                         ):
                             raise OSError("WinHttpReadData failed")
-                        chunk = buf.raw[: read.value]
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if progress_cb:
-                            try:
-                                progress_cb(downloaded, total_size)
-                            except Exception:
-                                pass
-
-                return downloaded
+                        chunks.append(buf.raw[: read.value])
+                    return b"".join(chunks)
+                finally:
+                    winhttp.WinHttpCloseHandle(hRequest)
             finally:
-                winhttp.WinHttpCloseHandle(hRequest)
+                winhttp.WinHttpCloseHandle(hConnect)
         finally:
-            winhttp.WinHttpCloseHandle(hConnect)
-    finally:
-        winhttp.WinHttpCloseHandle(hSession)
+            winhttp.WinHttpCloseHandle(hSession)
+    except Exception as exc:
+        logger.info(f"WinHTTP failed, falling back to urllib: {exc}")
+        return _urllib_get(url, timeout_ms)
+
+
+def _urllib_download(
+    url: str,
+    save_path: str,
+    timeout_ms: int = 60000,
+    progress_cb: Optional[Callable[[int, int], None]] = None,
+) -> int:
+    """使用 urllib 下载文件到本地路径（作为 WinHTTP 的备用方案）。"""
+    import urllib.request
+    timeout = timeout_ms / 1000.0
+    req = urllib.request.Request(url, headers={
+        "Accept": "application/octet-stream",
+        "User-Agent": f"ConnectHub-Updater/{_DEFAULT_VERSION}",
+    })
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        total_size = int(resp.headers.get("Content-Length", 0))
+        downloaded = 0
+        chunk_size = 32 * 1024
+        with open(save_path, "wb") as f:
+            while True:
+                chunk = resp.read(chunk_size)
+                if not chunk:
+                    break
+                f.write(chunk)
+                downloaded += len(chunk)
+                if progress_cb:
+                    try:
+                        progress_cb(downloaded, total_size)
+                    except Exception:
+                        pass
+        return downloaded
+
+
+def _winhttp_download(
+    url: str,
+    save_path: str,
+    timeout_ms: int = 60000,
+    progress_cb: Optional[Callable[[int, int], None]] = None,
+) -> int:
+    """使用 WinHTTP 下载文件到本地路径，返回下载字节数。失败时自动回退到 urllib。"""
+    try:
+        winhttp = ctypes.windll.winhttp
+
+        hSession = winhttp.WinHttpOpen(
+            f"ConnectHub-Updater/{_DEFAULT_VERSION}",
+            1,  # WINHTTP_ACCESS_TYPE_DEFAULT_PROXY
+            None,
+            None,
+            0,
+        )
+        if not hSession:
+            raise OSError("WinHttpOpen failed")
+
+        try:
+            parsed = urlparse(url)
+            host = parsed.hostname or ""
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+
+            hConnect = winhttp.WinHttpConnect(hSession, host, port, 0)
+            if not hConnect:
+                raise OSError("WinHttpConnect failed")
+
+            try:
+                path = parsed.path or "/"
+                if parsed.query:
+                    path += "?" + parsed.query
+
+                flags = 0x00800000 if parsed.scheme == "https" else 0
+                hRequest = winhttp.WinHttpOpenRequest(
+                    hConnect, "GET", path, None, None, None, flags
+                )
+                if not hRequest:
+                    raise OSError("WinHttpOpenRequest failed")
+
+                try:
+                    if timeout_ms > 0:
+                        dw = wintypes.DWORD(timeout_ms)
+                        sz = ctypes.sizeof(dw)
+                        winhttp.WinHttpSetOption(hRequest, 11, ctypes.byref(dw), sz)
+                        winhttp.WinHttpSetOption(hRequest, 5, ctypes.byref(dw), sz)
+                        winhttp.WinHttpSetOption(hRequest, 6, ctypes.byref(dw), sz)
+
+                    if not winhttp.WinHttpSendRequest(
+                        hRequest, None, 0, None, 0, 0, 0
+                    ):
+                        raise OSError("WinHttpSendRequest failed")
+
+                    if not winhttp.WinHttpReceiveResponse(hRequest, None):
+                        raise OSError("WinHttpReceiveResponse failed")
+
+                    status_code = wintypes.DWORD()
+                    status_size = wintypes.DWORD(ctypes.sizeof(status_code))
+                    winhttp.WinHttpQueryHeaders(
+                        hRequest, 19, None,
+                        ctypes.byref(status_code),
+                        ctypes.byref(status_size), None,
+                    )
+                    code = int(status_code.value)
+                    if code != 200:
+                        raise OSError(f"HTTP {code}")
+
+                    total_size = 0
+                    content_length = wintypes.DWORD()
+                    cl_size = wintypes.DWORD(ctypes.sizeof(content_length))
+                    if winhttp.WinHttpQueryHeaders(
+                        hRequest, 5, None,  # WINHTTP_QUERY_CONTENT_LENGTH
+                        ctypes.byref(content_length),
+                        ctypes.byref(cl_size), None,
+                    ):
+                        total_size = int(content_length.value)
+
+                    downloaded = 0
+                    with open(save_path, "wb") as f:
+                        while True:
+                            avail = wintypes.DWORD()
+                            if not winhttp.WinHttpQueryDataAvailable(
+                                hRequest, ctypes.byref(avail)
+                            ):
+                                raise OSError("WinHttpQueryDataAvailable failed")
+                            if avail.value == 0:
+                                break
+                            buf = ctypes.create_string_buffer(avail.value)
+                            read = wintypes.DWORD()
+                            if not winhttp.WinHttpReadData(
+                                hRequest, buf, avail.value, ctypes.byref(read)
+                            ):
+                                raise OSError("WinHttpReadData failed")
+                            chunk = buf.raw[: read.value]
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if progress_cb:
+                                try:
+                                    progress_cb(downloaded, total_size)
+                                except Exception:
+                                    pass
+
+                    return downloaded
+                finally:
+                    winhttp.WinHttpCloseHandle(hRequest)
+            finally:
+                winhttp.WinHttpCloseHandle(hConnect)
+        finally:
+            winhttp.WinHttpCloseHandle(hSession)
+    except Exception as exc:
+        logger.info(f"WinHTTP download failed, falling back to urllib: {exc}")
+        return _urllib_download(url, save_path, timeout_ms, progress_cb)
 
 
 def _find_version_json() -> Path:
